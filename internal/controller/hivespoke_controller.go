@@ -46,6 +46,10 @@ type statusResponse struct {
 	Budget map[string]any `json:"budget"`
 }
 
+// Reading /api/status needs the spoke's dashboard token, which lives in the
+// hive-secrets Secret in each spoke namespace. Without this rule the pod exec
+// succeeds and the token read fails, so a healthy spoke reports unreachable.
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
 // +kubebuilder:rbac:groups=hive.tunaos.org,resources=hivespokes,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=hive.tunaos.org,resources=hivespokes/status,verbs=get;update;patch
 

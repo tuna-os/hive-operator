@@ -1,3 +1,13 @@
+# The namespace lives here, not in config/manager: RBAC is applied first and
+# every object in this file is namespaced, so `make deploy` otherwise fails on a
+# fresh cluster and succeeds on the second run.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hive-system
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
