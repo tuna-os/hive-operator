@@ -1,0 +1,312 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: hivespokes.hive.tunaos.org
+spec:
+  group: hive.tunaos.org
+  names:
+    kind: HiveSpoke
+    listKind: HiveSpokeList
+    plural: hivespokes
+    shortNames:
+    - spoke
+    singular: hivespoke
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.namespace
+      name: Namespace
+      type: string
+    - jsonPath: .spec.org
+      name: Org
+      type: string
+    - jsonPath: .status.agents[*]
+      name: Agents
+      priority: 1
+      type: integer
+    - jsonPath: .status.budgetPctUsed
+      name: Budget%
+      type: string
+    - jsonPath: .status.budgetExhausted
+      name: Exhausted
+      type: boolean
+    - jsonPath: .status.reachable
+      name: Reachable
+      type: boolean
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: HiveSpoke is one hive instance in the fleet.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: HiveSpokeSpec is the desired state of one hive instance.
+            properties:
+              budget:
+                description: Budget caps weekly token spend. Omit or set 0 for uncapped.
+                properties:
+                  criticalPct:
+                    default: 90
+                    format: int32
+                    type: integer
+                  periodDays:
+                    default: 7
+                    format: int32
+                    type: integer
+                  weeklyTokens:
+                    format: int64
+                    type: integer
+                type: object
+              holds:
+                description: |-
+                  Holds lists agents allowed to remain paused. Anything else found paused
+                  through the dashboard API is resumed: an undeclared hand pause is not
+                  durable state, it is how a spoke goes silently idle. Declaring a hold
+                  here makes it reviewable and survives a pod rebuild.
+                items:
+                  type: string
+                type: array
+              installationID:
+                description: |-
+                  InstallationID is the GitHub App installation. Exactly one per spoke:
+                  a repo under an account this installation does not cover 401-loops, and
+                  that is a hard constraint of the hive config, not something to route
+                  around per-repo.
+                type: string
+              ladderRef:
+                description: LadderRef selects the ModelLadder this spoke places agents
+                  from.
+                type: string
+              namespace:
+                description: Namespace the hive Deployment runs in.
+                type: string
+              org:
+                description: Org is the GitHub account or organisation this spoke
+                  acts on.
+                type: string
+              pins:
+                description: Pins fix individual agents' placement against rotation
+                  and healing.
+                items:
+                  description: |-
+                    AgentPin fixes one agent's placement. Rotation must leave a pinned agent's
+                    rung alone, and healing must not "repair" it back onto the ladder.
+
+                    This exists because a pin that anything else can overwrite is not a pin. The
+                    hive config carries a `cli_pinned` field that the rotation script never read,
+                    so a model set through the dashboard was reverted within 20 minutes; the
+                    watchdog then rewrote it again, because its repair path only ever selects a
+                    tier member and therefore can never restore a deliberately off-ladder choice.
+                  properties:
+                    agent:
+                      description: Agent is the agent name, e.g. "supervisor".
+                      type: string
+                    backend:
+                      description: 'Backend is the CLI that runs it: claude, codex,
+                        agy, pi.'
+                      type: string
+                    model:
+                      description: |-
+                        Model is the exact id the backend accepts. It need NOT be on the ladder —
+                        pinning supervisor to gpt-5.4-mini (the only codex model with no service
+                        tier, and so unmetered) is the motivating case.
+                      type: string
+                    reason:
+                      description: Reason is free text, surfaced in the dashboard
+                        and in events.
+                      type: string
+                  required:
+                  - agent
+                  - backend
+                  - model
+                  type: object
+                type: array
+              primarySpoke:
+                description: |-
+                  PrimarySpoke names the spoke that owns fleet-wide resources (the
+                  contributor pool). A non-primary spoke must skip contributor
+                  reconciliation or two controllers fight over the same replicas.
+                type: string
+              repos:
+                description: |-
+                  Repos this spoke manages. Curated deliberately — a repo enumerator cannot
+                  infer "the handful I am actively committing to".
+                items:
+                  type: string
+                type: array
+            required:
+            - namespace
+            - org
+            type: object
+          status:
+            description: HiveSpokeStatus is the observed state.
+            properties:
+              agents:
+                items:
+                  description: AgentState is the observed state of one agent.
+                  properties:
+                    backend:
+                      type: string
+                    idleSeconds:
+                      description: |-
+                        IdleSeconds since the last kick. The single most useful number for
+                        noticing a fleet that has quietly stopped: every other signal stayed green
+                        through an eight-hour outage.
+                      format: int64
+                      type: integer
+                    lastKick:
+                      format: date-time
+                      type: string
+                    mode:
+                      type: string
+                    model:
+                      type: string
+                    name:
+                      type: string
+                    onDemand:
+                      type: boolean
+                    paused:
+                      type: boolean
+                    pausedReason:
+                      type: string
+                    pausedTrigger:
+                      description: |-
+                        PausedTrigger distinguishes why. NOTE it does NOT distinguish an operator
+                        pause from rotation's own: rotation authenticates with the owner session
+                        cookie, so a strand records exactly as a human pause does
+                        (reason "manual pause", trigger "dashboard-api"). The stranded journal is
+                        the only reliable discriminator.
+                      type: string
+                    pinned:
+                      description: Pinned is true when Spec.Pins covers this agent.
+                      type: boolean
+                  required:
+                  - name
+                  - paused
+                  type: object
+                type: array
+              budgetExhausted:
+                description: |-
+                  BudgetExhausted mirrors the governor's own suppression gate. When true the
+                  governor stops kicking on purpose, and nothing should nudge past it.
+                type: boolean
+              budgetPctUsed:
+                type: string
+              budgetUsedTokens:
+                format: int64
+                type: integer
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              hiveID:
+                type: string
+              observedAt:
+                format: date-time
+                type: string
+              providers:
+                items:
+                  description: ProviderState is a measured reading for one backend
+                    provider.
+                  properties:
+                    note:
+                      type: string
+                    provider:
+                      type: string
+                    resetsAt:
+                      format: date-time
+                      type: string
+                    usedPercent:
+                      description: |-
+                        UsedPercent is 0-100, or -1 when genuinely unmeasured.
+
+                        The distinction matters more than it looks: "unmeasured" is not evidence
+                        of exhaustion and must keep a provider eligible, while a positive reading
+                        at 100 must evacuate it. Conflating them either strands a healthy fleet
+                        or keeps filling a dead pool.
+                      format: int32
+                      type: integer
+                  required:
+                  - provider
+                  - usedPercent
+                  type: object
+                type: array
+              reachable:
+                type: boolean
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

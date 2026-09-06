@@ -1,0 +1,50 @@
+# The fleet as it actually runs today. Every controller starts in Shadow.
+apiVersion: hive.tunaos.org/v1alpha1
+kind: SharedAuth
+metadata:
+  name: fleet
+spec:
+  primaryNamespace: hive
+  namespaces: [hive, hive-reef, hive-hanthor]
+  agentHome: /data/home
+  dirs: [".claude", ".gemini", ".codex"]
+  mode: Shadow
+  repairPermissions: true
+  repairTheme: true
+---
+apiVersion: hive.tunaos.org/v1alpha1
+kind: HiveSpoke
+metadata:
+  name: school
+spec:
+  namespace: hive
+  org: tuna-os
+  installationID: "137498420"
+  primarySpoke: hive
+  budget: {weeklyTokens: 0}      # uncapped
+  pins:
+    - agent: supervisor
+      backend: codex
+      model: gpt-5.4-mini
+      reason: "only codex model with no service tier — unmetered, and supervisor is the highest-frequency agent"
+---
+apiVersion: hive.tunaos.org/v1alpha1
+kind: HiveSpoke
+metadata:
+  name: reef
+spec:
+  namespace: hive-reef
+  org: tuna-os
+  installationID: "137498420"    # shares school's 7100/hr budget
+  primarySpoke: hive
+---
+apiVersion: hive.tunaos.org/v1alpha1
+kind: HiveSpoke
+metadata:
+  name: hanthor
+spec:
+  namespace: hive-hanthor
+  org: hanthor
+  installationID: "158987150"
+  primarySpoke: hive
+  repos: [indiafoss-companion, indiafoss-chat-android, dotfiles, hummingbird-github, reilly.asia, homebrew-tap]

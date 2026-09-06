@@ -1,0 +1,192 @@
+package v1alpha1
+
+import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+// AgentPin fixes one agent's placement. Rotation must leave a pinned agent's
+// rung alone, and healing must not "repair" it back onto the ladder.
+//
+// This exists because a pin that anything else can overwrite is not a pin. The
+// hive config carries a `cli_pinned` field that the rotation script never read,
+// so a model set through the dashboard was reverted within 20 minutes; the
+// watchdog then rewrote it again, because its repair path only ever selects a
+// tier member and therefore can never restore a deliberately off-ladder choice.
+type AgentPin struct {
+	// Agent is the agent name, e.g. "supervisor".
+	Agent string `json:"agent"`
+	// Backend is the CLI that runs it: claude, codex, agy, pi.
+	Backend string `json:"backend"`
+	// Model is the exact id the backend accepts. It need NOT be on the ladder —
+	// pinning supervisor to gpt-5.4-mini (the only codex model with no service
+	// tier, and so unmetered) is the motivating case.
+	Model string `json:"model"`
+	// Reason is free text, surfaced in the dashboard and in events.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+}
+
+// BudgetSpec caps token spend for a spoke.
+//
+// WeeklyTokens == 0 means uncapped. This is load-bearing: when a limit is set
+// and exceeded, the hive governor stops marking agents due, which is
+// indistinguishable from a stalled scheduler unless you look at the budget.
+// An operator that nudges agents MUST consult Status.BudgetExhausted first, or
+// it spends money the operator explicitly capped.
+type BudgetSpec struct {
+	// +optional
+	WeeklyTokens int64 `json:"weeklyTokens,omitempty"`
+	// +optional
+	// +kubebuilder:default=7
+	PeriodDays int32 `json:"periodDays,omitempty"`
+	// +optional
+	// +kubebuilder:default=90
+	CriticalPct int32 `json:"criticalPct,omitempty"`
+}
+
+// HiveSpokeSpec is the desired state of one hive instance.
+type HiveSpokeSpec struct {
+	// Namespace the hive Deployment runs in.
+	Namespace string `json:"namespace"`
+
+	// Org is the GitHub account or organisation this spoke acts on.
+	Org string `json:"org"`
+
+	// InstallationID is the GitHub App installation. Exactly one per spoke:
+	// a repo under an account this installation does not cover 401-loops, and
+	// that is a hard constraint of the hive config, not something to route
+	// around per-repo.
+	// +optional
+	InstallationID string `json:"installationID,omitempty"`
+
+	// Repos this spoke manages. Curated deliberately — a repo enumerator cannot
+	// infer "the handful I am actively committing to".
+	// +optional
+	Repos []string `json:"repos,omitempty"`
+
+	// PrimarySpoke names the spoke that owns fleet-wide resources (the
+	// contributor pool). A non-primary spoke must skip contributor
+	// reconciliation or two controllers fight over the same replicas.
+	// +optional
+	PrimarySpoke string `json:"primarySpoke,omitempty"`
+
+	// Budget caps weekly token spend. Omit or set 0 for uncapped.
+	// +optional
+	Budget *BudgetSpec `json:"budget,omitempty"`
+
+	// Pins fix individual agents' placement against rotation and healing.
+	// +optional
+	Pins []AgentPin `json:"pins,omitempty"`
+
+	// Holds lists agents allowed to remain paused. Anything else found paused
+	// through the dashboard API is resumed: an undeclared hand pause is not
+	// durable state, it is how a spoke goes silently idle. Declaring a hold
+	// here makes it reviewable and survives a pod rebuild.
+	// +optional
+	Holds []string `json:"holds,omitempty"`
+
+	// LadderRef selects the ModelLadder this spoke places agents from.
+	// +optional
+	LadderRef string `json:"ladderRef,omitempty"`
+}
+
+// ProviderState is a measured reading for one backend provider.
+type ProviderState struct {
+	Provider string `json:"provider"`
+	// UsedPercent is 0-100, or -1 when genuinely unmeasured.
+	//
+	// The distinction matters more than it looks: "unmeasured" is not evidence
+	// of exhaustion and must keep a provider eligible, while a positive reading
+	// at 100 must evacuate it. Conflating them either strands a healthy fleet
+	// or keeps filling a dead pool.
+	UsedPercent int32 `json:"usedPercent"`
+	// +optional
+	Note string `json:"note,omitempty"`
+	// +optional
+	ResetsAt *metav1.Time `json:"resetsAt,omitempty"`
+}
+
+// AgentState is the observed state of one agent.
+type AgentState struct {
+	Name string `json:"name"`
+	// +optional
+	Backend string `json:"backend,omitempty"`
+	// +optional
+	Model string `json:"model,omitempty"`
+	// +optional
+	Mode   string `json:"mode,omitempty"`
+	Paused bool   `json:"paused"`
+	// PausedTrigger distinguishes why. NOTE it does NOT distinguish an operator
+	// pause from rotation's own: rotation authenticates with the owner session
+	// cookie, so a strand records exactly as a human pause does
+	// (reason "manual pause", trigger "dashboard-api"). The stranded journal is
+	// the only reliable discriminator.
+	// +optional
+	PausedTrigger string `json:"pausedTrigger,omitempty"`
+	// +optional
+	PausedReason string `json:"pausedReason,omitempty"`
+	// +optional
+	OnDemand bool `json:"onDemand,omitempty"`
+	// +optional
+	LastKick *metav1.Time `json:"lastKick,omitempty"`
+	// IdleSeconds since the last kick. The single most useful number for
+	// noticing a fleet that has quietly stopped: every other signal stayed green
+	// through an eight-hour outage.
+	// +optional
+	IdleSeconds int64 `json:"idleSeconds,omitempty"`
+	// Pinned is true when Spec.Pins covers this agent.
+	// +optional
+	Pinned bool `json:"pinned,omitempty"`
+}
+
+// HiveSpokeStatus is the observed state.
+type HiveSpokeStatus struct {
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// +optional
+	HiveID string `json:"hiveID,omitempty"`
+	// +optional
+	Reachable bool `json:"reachable"`
+	// +optional
+	Agents []AgentState `json:"agents,omitempty"`
+	// +optional
+	Providers []ProviderState `json:"providers,omitempty"`
+	// +optional
+	BudgetUsedTokens int64 `json:"budgetUsedTokens,omitempty"`
+	// +optional
+	BudgetPctUsed string `json:"budgetPctUsed,omitempty"`
+	// BudgetExhausted mirrors the governor's own suppression gate. When true the
+	// governor stops kicking on purpose, and nothing should nudge past it.
+	// +optional
+	BudgetExhausted bool `json:"budgetExhausted,omitempty"`
+	// +optional
+	ObservedAt *metav1.Time `json:"observedAt,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster,shortName=spoke
+// +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.spec.namespace`
+// +kubebuilder:printcolumn:name="Org",type=string,JSONPath=`.spec.org`
+// +kubebuilder:printcolumn:name="Agents",type=integer,JSONPath=`.status.agents[*]`,priority=1
+// +kubebuilder:printcolumn:name="Budget%",type=string,JSONPath=`.status.budgetPctUsed`
+// +kubebuilder:printcolumn:name="Exhausted",type=boolean,JSONPath=`.status.budgetExhausted`
+// +kubebuilder:printcolumn:name="Reachable",type=boolean,JSONPath=`.status.reachable`
+
+// HiveSpoke is one hive instance in the fleet.
+type HiveSpoke struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   HiveSpokeSpec   `json:"spec,omitempty"`
+	Status HiveSpokeStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// HiveSpokeList contains a list of HiveSpoke.
+type HiveSpokeList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []HiveSpoke `json:"items"`
+}
+
+func init() { SchemeBuilder.Register(&HiveSpoke{}, &HiveSpokeList{}) }

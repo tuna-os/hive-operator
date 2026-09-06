@@ -1,0 +1,252 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: modelladders.hive.tunaos.org
+spec:
+  group: hive.tunaos.org
+  names:
+    kind: ModelLadder
+    listKind: ModelLadderList
+    plural: modelladders
+    shortNames:
+    - ladder
+    singular: modelladder
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
+    - jsonPath: .status.observedAt
+      name: Observed
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ModelLadder is the capability ladder agents are placed on.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ModelLadderSpec describes how to build the placement ladder.
+            properties:
+              bands:
+                description: Bands map scores to tiers, highest first.
+                items:
+                  description: |-
+                    BandSpec maps a benchmark score to a tier.
+
+                    Bands are scale-specific and MUST be derived from the feed's own
+                    distribution. Carrying thresholds across benchmarks is how T1 came back empty:
+                    cut-offs taken from a suite whose field runs to 89.5 matched nothing on an
+                    index that tops out at 58.2, and every T1 agent would have stranded.
+                  properties:
+                    minScore:
+                      type: string
+                    tier:
+                      type: string
+                  required:
+                  - minScore
+                  - tier
+                  type: object
+                type: array
+              benchmarkSecretRef:
+                description: BenchmarkSecretRef names a Secret key holding the benchmark
+                  API key.
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - key
+                - name
+                - namespace
+                type: object
+              benchmarkURL:
+                description: BenchmarkURL supplies the ordering signal.
+                type: string
+              builtin:
+                description: |-
+                  Builtin rungs are the fallback and the UNION partner — not merely a
+                  fallback. A benchmark feed does not cover every provider a fleet runs
+                  (measured: zero DeepSeek entries, and the only Google entries were models
+                  the CLI does not offer), so letting the feed REPLACE this list deletes
+                  whole providers from the ladder the moment a refresh succeeds.
+                items:
+                  description: Rung is one placeable (provider, backend, model) at
+                    a tier.
+                  properties:
+                    available:
+                      description: |-
+                        Available is false when the backend's own model list does not offer this
+                        id. Such a rung must never be placed: an agent launched on an id the CLI
+                        rejects dies at startup and reads as a dead agent, not a bad config.
+                      type: boolean
+                    backend:
+                      type: string
+                    model:
+                      type: string
+                    provider:
+                      type: string
+                    score:
+                      type: string
+                    source:
+                      description: 'Source is where the rung came from: "benchmark"
+                        or "builtin".'
+                      type: string
+                    tier:
+                      type: string
+                  required:
+                  - backend
+                  - model
+                  - provider
+                  - tier
+                  type: object
+                type: array
+              mode:
+                default: Shadow
+                description: |-
+                  ReconcileMode controls how far a controller is allowed to go.
+
+                  Every controller starts at Shadow and graduates. This is not caution for its
+                  own sake: the hive scripts warn in capitals that two control planes issuing
+                  the same mutations is worse than none, and a shadow pass is the only way to
+                  diff a new decision engine against the one already running.
+                enum:
+                - Observe
+                - Shadow
+                - Enforce
+                type: string
+            type: object
+          status:
+            description: ModelLadderStatus is the computed ladder.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              dropped:
+                description: Dropped rungs and why — the audit trail for "why is nothing
+                  at T1".
+                items:
+                  type: string
+                type: array
+              effective:
+                description: |-
+                  Effective is rank(benchmark) UNION builtin, then gated by the live
+                  inventory. De-duplicated on provider+MODEL, not provider: scoring a
+                  provider says nothing about whether the specific rungs we run are the ones
+                  scored.
+                items:
+                  description: Rung is one placeable (provider, backend, model) at
+                    a tier.
+                  properties:
+                    available:
+                      description: |-
+                        Available is false when the backend's own model list does not offer this
+                        id. Such a rung must never be placed: an agent launched on an id the CLI
+                        rejects dies at startup and reads as a dead agent, not a bad config.
+                      type: boolean
+                    backend:
+                      type: string
+                    model:
+                      type: string
+                    provider:
+                      type: string
+                    score:
+                      type: string
+                    source:
+                      description: 'Source is where the rung came from: "benchmark"
+                        or "builtin".'
+                      type: string
+                    tier:
+                      type: string
+                  required:
+                  - backend
+                  - model
+                  - provider
+                  - tier
+                  type: object
+                type: array
+              observedAt:
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
