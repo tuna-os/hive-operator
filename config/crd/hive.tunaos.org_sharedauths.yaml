@@ -71,6 +71,7 @@ spec:
                 - .claude
                 - .gemini
                 - .codex
+                - .config/muse
                 description: Dirs under AgentHome that must resolve to the same storage
                   everywhere.
                 items:
