@@ -136,7 +136,7 @@ func (c *Client) OwnerSession(ctx context.Context, ns, pod string) (string, erro
 func (c *Client) GetJSON(ctx context.Context, ns, pod, token, path string, v any) error {
 	script := fmt.Sprintf(
 		`curl -sS -m 25 -H %s %s 2>/dev/null`,
-		shellQuote("X-Hive-Internal: "+token), shellQuote(APIAddr+path))
+		ShellQuote("X-Hive-Internal: "+token), ShellQuote(APIAddr+path))
 	out, err := c.Sh(ctx, ns, pod, script)
 	if err != nil {
 		return err
@@ -155,12 +155,12 @@ func (c *Client) GetJSON(ctx context.Context, ns, pod, token, path string, v any
 func (c *Client) Post(ctx context.Context, ns, pod, session, path string) (string, error) {
 	script := fmt.Sprintf(
 		`curl -sS -m 75 -X POST -H %s %s 2>&1`,
-		shellQuote("Cookie: hive_session="+session), shellQuote(APIAddr+path))
+		ShellQuote("Cookie: hive_session="+session), ShellQuote(APIAddr+path))
 	return c.Sh(ctx, ns, pod, script)
 }
 
-// shellQuote single-quotes a string for /bin/sh.
-func shellQuote(s string) string {
+// ShellQuote single-quotes a string for /bin/sh.
+func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
