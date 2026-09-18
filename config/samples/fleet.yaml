@@ -7,7 +7,7 @@ spec:
   primaryNamespace: hive
   namespaces: [hive, hive-reef, hive-hanthor]
   agentHome: /data/home
-  dirs: [".claude", ".gemini", ".codex"]
+  dirs: [".claude", ".gemini", ".codex", ".config/muse"]
   mode: Shadow
   repairPermissions: true
   repairTheme: true

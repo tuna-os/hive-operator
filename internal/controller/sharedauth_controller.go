@@ -54,7 +54,7 @@ func (r *SharedAuthReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	dirs := sa.Spec.Dirs
 	if len(dirs) == 0 {
-		dirs = []string{".claude", ".gemini", ".codex"}
+		dirs = []string{".claude", ".gemini", ".codex", ".config/muse"}
 	}
 
 	status := hivev1.SharedAuthStatus{Consistent: true}

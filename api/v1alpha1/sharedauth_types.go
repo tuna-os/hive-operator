@@ -46,8 +46,15 @@ type SharedAuthSpec struct {
 	AgentHome string `json:"agentHome,omitempty"`
 
 	// Dirs under AgentHome that must resolve to the same storage everywhere.
+	//
+	// ".config/muse" carries Muse Code's credential (auth.json, written by
+	// `muse login` / `muse auth set`), so one login covers the fleet the same
+	// way ".claude" does. Sharing it is OPTIONAL for muse in a way it is not
+	// for claude: muse also reads META_API_KEY from the environment and
+	// documents that as always taking priority over the stored credential, so
+	// a spoke supplying the key via its Secret needs no shared dir at all.
 	// +optional
-	// +kubebuilder:default={".claude",".gemini",".codex"}
+	// +kubebuilder:default={".claude",".gemini",".codex",".config/muse"}
 	Dirs []string `json:"dirs,omitempty"`
 
 	// Mode gates repairs.
