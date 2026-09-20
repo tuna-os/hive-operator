@@ -23,7 +23,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: manager
-          image: ghcr.io/tuna-os/hive-operator:sha-a9d8737
+          image: ghcr.io/tuna-os/hive-operator:sha-2c68337
           args: ["--metrics-bind-address=:8080", "--dashboard-bind-address=:8082"]
           ports:
             - {name: metrics, containerPort: 8080}

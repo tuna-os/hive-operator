@@ -21,6 +21,8 @@ spec:
   org: tuna-os
   installationID: "137498420"
   primarySpoke: hive
+  ladderRef: fleet
+  rotationMode: Shadow
   budget: {weeklyTokens: 0}      # uncapped
   pins:
     - agent: supervisor
@@ -37,6 +39,8 @@ spec:
   org: tuna-os
   installationID: "137498420"    # shares school's 7100/hr budget
   primarySpoke: hive
+  ladderRef: fleet
+  rotationMode: Shadow
 ---
 apiVersion: hive.tunaos.org/v1alpha1
 kind: HiveSpoke
@@ -47,4 +51,30 @@ spec:
   org: hanthor
   installationID: "158987150"
   primarySpoke: hive
+  ladderRef: fleet
+  rotationMode: Shadow
   repos: [indiafoss-companion, indiafoss-chat-android, dotfiles, hummingbird-github, reilly.asia, homebrew-tap]
+---
+apiVersion: hive.tunaos.org/v1alpha1
+kind: ModelLadder
+metadata:
+  name: fleet
+spec:
+  mode: Shadow
+  inventoryConfigMapRef:
+    namespace: hive
+    name: hive-model-inventory
+    key: inventory.tsv
+  builtin:
+    - {tier: T1, provider: google, backend: agy, model: gemini-3.8-flash-high, effort: high, source: builtin}
+    - {tier: T1, provider: deepseek, backend: pi, model: deepseek-flash, source: builtin}
+    - {tier: T1, provider: openai, backend: codex, model: gpt-5.6-sol, effort: high, source: builtin}
+    - {tier: T1, provider: anthropic, backend: claude, model: claude-opus-5, source: builtin}
+    - {tier: T2, provider: google, backend: agy, model: gemini-3.8-flash-low, effort: medium, source: builtin}
+    - {tier: T2, provider: deepseek, backend: pi, model: deepseek-flash, source: builtin}
+    - {tier: T2, provider: openai, backend: codex, model: gpt-5.6-luna, effort: medium, source: builtin}
+    - {tier: T2, provider: anthropic, backend: claude, model: claude-sonnet-5, source: builtin}
+    - {tier: T3, provider: google, backend: agy, model: gemini-3.8-flash-low, effort: low, source: builtin}
+    - {tier: T3, provider: deepseek, backend: pi, model: deepseek-flash, source: builtin}
+    - {tier: T3, provider: openai, backend: codex, model: gpt-5.6-luna, effort: low, source: builtin}
+    - {tier: T3, provider: anthropic, backend: claude, model: claude-haiku-4-5-20251001, source: builtin}

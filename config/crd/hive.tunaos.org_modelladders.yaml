@@ -105,6 +105,11 @@ spec:
                       type: boolean
                     backend:
                       type: string
+                    effort:
+                      description: |-
+                        Effort is part of the rung because inference quality and consumption
+                        change materially with reasoning effort.
+                      type: string
                     model:
                       type: string
                     provider:
@@ -124,6 +129,22 @@ spec:
                   - tier
                   type: object
                 type: array
+              inventoryConfigMapRef:
+                description: |-
+                  InventoryConfigMapRef points at the live backend model inventory. When
+                  omitted it defaults to hive/hive-model-inventory, key inventory.tsv.
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - key
+                - name
+                - namespace
+                type: object
               mode:
                 default: Shadow
                 description: |-
@@ -207,9 +228,8 @@ spec:
               effective:
                 description: |-
                   Effective is rank(benchmark) UNION builtin, then gated by the live
-                  inventory. De-duplicated on provider+MODEL, not provider: scoring a
-                  provider says nothing about whether the specific rungs we run are the ones
-                  scored.
+                  inventory. De-duplicated on tier+provider+model+effort: a model can be a
+                  valid fallback at several tiers, and effort changes capacity and cost.
                 items:
                   description: Rung is one placeable (provider, backend, model) at
                     a tier.
@@ -221,6 +241,11 @@ spec:
                         rejects dies at startup and reads as a dead agent, not a bad config.
                       type: boolean
                     backend:
+                      type: string
+                    effort:
+                      description: |-
+                        Effort is part of the rung because inference quality and consumption
+                        change materially with reasoning effort.
                       type: string
                     model:
                       type: string
