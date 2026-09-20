@@ -8,6 +8,10 @@ type Rung struct {
 	Provider string `json:"provider"`
 	Backend  string `json:"backend"`
 	Model    string `json:"model"`
+	// Effort is part of the rung because inference quality and consumption
+	// change materially with reasoning effort.
+	// +optional
+	Effort string `json:"effort,omitempty"`
 	// +optional
 	Score string `json:"score,omitempty"`
 	// Source is where the rung came from: "benchmark" or "builtin".
@@ -40,6 +44,11 @@ type ModelLadderSpec struct {
 	// +optional
 	BenchmarkSecretRef *SecretKeyRef `json:"benchmarkSecretRef,omitempty"`
 
+	// InventoryConfigMapRef points at the live backend model inventory. When
+	// omitted it defaults to hive/hive-model-inventory, key inventory.tsv.
+	// +optional
+	InventoryConfigMapRef *ConfigMapKeyRef `json:"inventoryConfigMapRef,omitempty"`
+
 	// Bands map scores to tiers, highest first.
 	// +optional
 	Bands []BandSpec `json:"bands,omitempty"`
@@ -57,6 +66,13 @@ type ModelLadderSpec struct {
 	Mode ReconcileMode `json:"mode,omitempty"`
 }
 
+// ConfigMapKeyRef points at one key in a ConfigMap.
+type ConfigMapKeyRef struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Key       string `json:"key"`
+}
+
 // SecretKeyRef points at one key in a Secret.
 type SecretKeyRef struct {
 	Name      string `json:"name"`
@@ -69,9 +85,8 @@ type ModelLadderStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// Effective is rank(benchmark) UNION builtin, then gated by the live
-	// inventory. De-duplicated on provider+MODEL, not provider: scoring a
-	// provider says nothing about whether the specific rungs we run are the ones
-	// scored.
+	// inventory. De-duplicated on provider+model+effort: the same model at low
+	// and high effort is a different capacity and cost choice.
 	// +optional
 	Effective []Rung `json:"effective,omitempty"`
 	// Dropped rungs and why — the audit trail for "why is nothing at T1".

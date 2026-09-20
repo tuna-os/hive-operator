@@ -7,6 +7,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
   - pods
   verbs:
   - get
@@ -19,15 +26,10 @@ rules:
   verbs:
   - create
 - apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-- apiGroups:
   - hive.tunaos.org
   resources:
   - hivespokes
+  - modelladders
   - sharedauths
   verbs:
   - get
@@ -39,6 +41,7 @@ rules:
   - hive.tunaos.org
   resources:
   - hivespokes/status
+  - modelladders/status
   - sharedauths/status
   verbs:
   - get

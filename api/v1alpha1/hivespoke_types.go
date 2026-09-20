@@ -86,6 +86,28 @@ type HiveSpokeSpec struct {
 	// LadderRef selects the ModelLadder this spoke places agents from.
 	// +optional
 	LadderRef string `json:"ladderRef,omitempty"`
+
+	// RotationMode controls placement decisions for this spoke. Shadow records
+	// the exact changes without applying them; Enforce performs the same plan.
+	// +optional
+	// +kubebuilder:default=Shadow
+	RotationMode ReconcileMode `json:"rotationMode,omitempty"`
+}
+
+// RotationDecision is one auditable placement decision.
+type RotationDecision struct {
+	Agent       string `json:"agent"`
+	FromBackend string `json:"fromBackend,omitempty"`
+	FromModel   string `json:"fromModel,omitempty"`
+	ToProvider  string `json:"toProvider"`
+	ToBackend   string `json:"toBackend"`
+	ToModel     string `json:"toModel"`
+	// +optional
+	ToEffort string `json:"toEffort,omitempty"`
+	Reason   string `json:"reason"`
+	Applied  bool   `json:"applied"`
+	// +optional
+	Error string `json:"error,omitempty"`
 }
 
 // ProviderState is a measured reading for one backend provider.
@@ -111,6 +133,8 @@ type AgentState struct {
 	Backend string `json:"backend,omitempty"`
 	// +optional
 	Model string `json:"model,omitempty"`
+	// +optional
+	Effort string `json:"effort,omitempty"`
 	// +optional
 	Mode   string `json:"mode,omitempty"`
 	Paused bool   `json:"paused"`
@@ -149,6 +173,10 @@ type HiveSpokeStatus struct {
 	Agents []AgentState `json:"agents,omitempty"`
 	// +optional
 	Providers []ProviderState `json:"providers,omitempty"`
+	// RotationPlan is replaced on every reconcile. In Shadow it is the exact
+	// action set the controller would apply if promoted to Enforce.
+	// +optional
+	RotationPlan []RotationDecision `json:"rotationPlan,omitempty"`
 	// +optional
 	BudgetUsedTokens int64 `json:"budgetUsedTokens,omitempty"`
 	// +optional

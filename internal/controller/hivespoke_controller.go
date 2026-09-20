@@ -2,11 +2,13 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -19,6 +21,13 @@ import (
 )
 
 const spokeController = "hivespoke"
+
+var agentTiers = map[string]string{
+	"supervisor": "T2", "scanner": "T2", "ci-maintainer": "T2",
+	"quality": "T2", "guide": "T2", "outreach": "T2",
+	"operations": "T2", "telemetry": "T2", "architect": "T1",
+	"sec-check": "T1", "strategist": "T1",
+}
 
 // HiveSpokeReconciler observes a spoke and publishes its state as metrics.
 //
@@ -37,6 +46,7 @@ type statusResponse struct {
 		Name          string `json:"name"`
 		CLI           string `json:"cli"`
 		Model         string `json:"model"`
+		Effort        string `json:"reasoningEffort"`
 		Mode          string `json:"mode"`
 		Paused        bool   `json:"paused"`
 		PausedTrigger string `json:"pausedTrigger"`
@@ -59,7 +69,11 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := r.Get(ctx, req.NamespacedName, &sp); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	metrics.SetMode(spokeController, sp.Name, string(hivev1.ModeObserve))
+	rotationMode := sp.Spec.RotationMode
+	if rotationMode == "" {
+		rotationMode = hivev1.ModeShadow
+	}
+	metrics.SetMode(spokeController, sp.Name, string(rotationMode))
 
 	iv := r.Interval
 	if iv == 0 {
@@ -116,7 +130,7 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	for _, a := range sr.Agents {
 		od := a.OnDemand != nil && *a.OnDemand
 		st := hivev1.AgentState{
-			Name: a.Name, Backend: a.CLI, Model: a.Model, Mode: a.Mode,
+			Name: a.Name, Backend: a.CLI, Model: a.Model, Effort: a.Effort, Mode: a.Mode,
 			Paused: a.Paused, PausedTrigger: a.PausedTrigger, PausedReason: a.PausedReason,
 			OnDemand: od, IdleSeconds: ages[a.Name], Pinned: pinned[a.Name],
 		}
@@ -138,6 +152,32 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	metrics.AgentsTotal.WithLabelValues(sp.Name, "running").Set(float64(running))
 	metrics.AgentsTotal.WithLabelValues(sp.Name, "paused").Set(float64(paused))
 	metrics.AgentsTotal.WithLabelValues(sp.Name, "on_demand").Set(float64(onDemand))
+
+	// Build the same placement decision set in Shadow and Enforce. Keeping one
+	// planner is what makes a week of shadow output meaningful: promotion only
+	// changes whether the already-visible actions are applied.
+	sp.Status.Providers = r.providerUsage(ctx, &sp)
+	sp.Status.RotationPlan = nil
+	if rotationMode != hivev1.ModeObserve {
+		ladderName := sp.Spec.LadderRef
+		if ladderName == "" {
+			ladderName = "fleet"
+		}
+		var ladder hivev1.ModelLadder
+		if err := r.Get(ctx, client.ObjectKey{Name: ladderName}, &ladder); err == nil {
+			sp.Status.RotationPlan = planRotation(sp.Status.Agents, sp.Status.Providers, ladder.Status.Effective)
+			for i := range sp.Status.RotationPlan {
+				decision := &sp.Status.RotationPlan[i]
+				applied := false
+				if rotationMode == hivev1.ModeEnforce {
+					decision.Error = r.applyRotation(ctx, &sp, pod, decision)
+					applied = decision.Error == ""
+					decision.Applied = applied
+				}
+				metrics.Action(spokeController, sp.Name, "rotate", applied)
+			}
+		}
+	}
 
 	// Budget. BUDGET_EXHAUSTED is the governor's own suppression gate: when it
 	// is true, an empty agents_due list means "told not to spend", not "broken".
@@ -164,6 +204,124 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: iv}, nil
+}
+
+func (r *HiveSpokeReconciler) providerUsage(ctx context.Context, sp *hivev1.HiveSpoke) []hivev1.ProviderState {
+	var cm corev1.ConfigMap
+	err := r.Get(ctx, client.ObjectKey{Namespace: sp.Spec.Namespace, Name: "hive-provider-usage"}, &cm)
+	if err != nil && sp.Spec.Namespace != "hive" {
+		err = r.Get(ctx, client.ObjectKey{Namespace: "hive", Name: "hive-provider-usage"}, &cm)
+	}
+	providers := []string{"google", "meta", "deepseek", "openai", "anthropic"}
+	result := make([]hivev1.ProviderState, 0, len(providers))
+	for _, provider := range providers {
+		state := hivev1.ProviderState{Provider: provider, UsedPercent: -1, Note: "no reading"}
+		if err == nil {
+			state.Note = cm.Data[provider]
+			if fields := strings.Fields(state.Note); len(fields) > 0 && strings.HasSuffix(fields[0], "%") {
+				if n, parseErr := strconv.Atoi(strings.TrimSuffix(fields[0], "%")); parseErr == nil {
+					state.UsedPercent = int32(n)
+				}
+			}
+		}
+		metrics.ProviderUsedPercent.WithLabelValues(sp.Name, provider).Set(float64(state.UsedPercent))
+		result = append(result, state)
+	}
+	return result
+}
+
+func planRotation(agents []hivev1.AgentState, providers []hivev1.ProviderState, rungs []hivev1.Rung) []hivev1.RotationDecision {
+	usage := map[string]int32{}
+	for _, p := range providers {
+		usage[p.Provider] = p.UsedPercent
+	}
+	providerFor := func(backend, model string) string {
+		for _, rung := range rungs {
+			if rung.Backend == backend && rung.Model == model {
+				return rung.Provider
+			}
+		}
+		switch backend {
+		case "codex":
+			return "openai"
+		case "claude":
+			return "anthropic"
+		case "agy":
+			return "google"
+		case "muse":
+			return "meta"
+		case "pi":
+			return "deepseek"
+		}
+		return "unknown"
+	}
+	var plan []hivev1.RotationDecision
+	for _, agent := range agents {
+		if agent.Pinned || agent.OnDemand || agent.Paused {
+			continue
+		}
+		tier := agentTiers[agent.Name]
+		if tier == "" {
+			continue
+		}
+		currentProvider := providerFor(agent.Backend, agent.Model)
+		currentValid := false
+		for _, rung := range rungs {
+			if rung.Available && rung.Tier == tier && rung.Backend == agent.Backend && rung.Model == agent.Model && (agent.Effort == "" || rung.Effort == agent.Effort) {
+				currentValid = true
+				break
+			}
+		}
+		if currentValid && usage[currentProvider] < 100 {
+			continue
+		}
+		for _, rung := range rungs {
+			if !rung.Available || rung.Tier != tier || usage[rung.Provider] >= 100 {
+				continue
+			}
+			reason := "current rung is not in the effective ladder"
+			if usage[currentProvider] >= 100 {
+				reason = currentProvider + " usage is exhausted"
+			}
+			plan = append(plan, hivev1.RotationDecision{Agent: agent.Name, FromBackend: agent.Backend, FromModel: agent.Model, ToProvider: rung.Provider, ToBackend: rung.Backend, ToModel: rung.Model, ToEffort: rung.Effort, Reason: reason})
+			break
+		}
+	}
+	return plan
+}
+
+func (r *HiveSpokeReconciler) applyRotation(ctx context.Context, sp *hivev1.HiveSpoke, pod string, d *hivev1.RotationDecision) string {
+	session, err := r.Hive.OwnerSession(ctx, sp.Spec.Namespace, pod)
+	if err != nil || session == "" {
+		return "no usable owner session"
+	}
+	post := func(path, want string) error {
+		out, err := r.Hive.Post(ctx, sp.Spec.Namespace, pod, session, path)
+		if err != nil {
+			return err
+		}
+		var response map[string]any
+		if json.Unmarshal([]byte(out), &response) != nil || response["status"] != want {
+			return fmt.Errorf("unexpected response: %.200s", out)
+		}
+		return nil
+	}
+	if err := post("/api/switch/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.ToBackend), "switched"); err != nil {
+		return err.Error()
+	}
+	if err := post("/api/model/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.ToModel), "model_set"); err != nil {
+		_, _ = r.Hive.Post(ctx, sp.Spec.Namespace, pod, session, "/api/switch/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.FromBackend))
+		return "model change failed and backend was rolled back: " + err.Error()
+	}
+	if d.ToEffort != "" {
+		if err := post("/api/effort/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.ToEffort), "effort_set"); err != nil {
+			return "placement changed but effort change failed: " + err.Error()
+		}
+	}
+	if err := post("/api/kick/"+hiveclient.EscapePath(d.Agent), "kicked"); err != nil {
+		return "placement changed but kick failed: " + err.Error()
+	}
+	return ""
 }
 
 func numFrom(m map[string]any, k string) (float64, bool) {
