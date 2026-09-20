@@ -32,7 +32,9 @@ type ModelLadderReconciler struct {
 	HTTP     *http.Client
 }
 
-// +kubebuilder:rbac:groups="",resources=configmaps;secrets,verbs=get
+// controller-runtime reads these through its cache, which needs list/watch in
+// addition to get even though reconciliation only fetches named objects.
+// +kubebuilder:rbac:groups="",resources=configmaps;secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=hive.tunaos.org,resources=modelladders,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=hive.tunaos.org,resources=modelladders/status,verbs=get;update;patch
 

@@ -8,13 +8,8 @@ rules:
   - ""
   resources:
   - configmaps
-  - secrets
-  verbs:
-  - get
-- apiGroups:
-  - ""
-  resources:
   - pods
+  - secrets
   verbs:
   - get
   - list
