@@ -331,6 +331,8 @@ spec:
                       type: string
                     fromBackend:
                       type: string
+                    fromEffort:
+                      type: string
                     fromModel:
                       type: string
                     reason:

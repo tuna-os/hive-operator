@@ -40,3 +40,13 @@ func TestPlanRotationReplacesUnknownRung(t *testing.T) {
 		t.Fatalf("unexpected plan: %#v", got)
 	}
 }
+
+func TestPlanRotationChangesEffortWithoutChangingProvider(t *testing.T) {
+	agents := []hivev1.AgentState{{Name: "scanner", Backend: "codex", Model: "gpt-luna", Effort: "low"}}
+	providers := []hivev1.ProviderState{{Provider: "openai", UsedPercent: 25}}
+	rungs := []hivev1.Rung{{Tier: "T2", Provider: "openai", Backend: "codex", Model: "gpt-luna", Effort: "medium", Available: true}}
+	got := planRotation(agents, providers, rungs)
+	if len(got) != 1 || got[0].FromBackend != got[0].ToBackend || got[0].FromModel != got[0].ToModel || got[0].ToEffort != "medium" {
+		t.Fatalf("unexpected effort-only plan: %#v", got)
+	}
+}

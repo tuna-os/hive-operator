@@ -99,9 +99,11 @@ type RotationDecision struct {
 	Agent       string `json:"agent"`
 	FromBackend string `json:"fromBackend,omitempty"`
 	FromModel   string `json:"fromModel,omitempty"`
-	ToProvider  string `json:"toProvider"`
-	ToBackend   string `json:"toBackend"`
-	ToModel     string `json:"toModel"`
+	// +optional
+	FromEffort string `json:"fromEffort,omitempty"`
+	ToProvider string `json:"toProvider"`
+	ToBackend  string `json:"toBackend"`
+	ToModel    string `json:"toModel"`
 	// +optional
 	ToEffort string `json:"toEffort,omitempty"`
 	Reason   string `json:"reason"`

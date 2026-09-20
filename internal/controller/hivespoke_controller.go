@@ -287,14 +287,19 @@ func planRotation(agents []hivev1.AgentState, providers []hivev1.ProviderState, 
 			continue
 		}
 		currentProvider := providerFor(agent.Backend, agent.Model)
-		currentValid := false
+		var currentRung *hivev1.Rung
 		for _, rung := range rungs {
-			if rung.Available && rung.Tier == tier && rung.Backend == agent.Backend && rung.Model == agent.Model && (agent.Effort == "" || rung.Effort == agent.Effort) {
-				currentValid = true
+			if rung.Available && rung.Tier == tier && rung.Backend == agent.Backend && rung.Model == agent.Model {
+				copy := rung
+				currentRung = &copy
 				break
 			}
 		}
-		if currentValid && usage[currentProvider] < 100 {
+		if currentRung != nil && usage[currentProvider] < 100 {
+			if currentRung.Effort == agent.Effort {
+				continue
+			}
+			plan = append(plan, hivev1.RotationDecision{Agent: agent.Name, FromBackend: agent.Backend, FromModel: agent.Model, FromEffort: agent.Effort, ToProvider: currentRung.Provider, ToBackend: currentRung.Backend, ToModel: currentRung.Model, ToEffort: currentRung.Effort, Reason: "reasoning effort differs from the tier rung"})
 			continue
 		}
 		for _, rung := range rungs {
@@ -305,7 +310,7 @@ func planRotation(agents []hivev1.AgentState, providers []hivev1.ProviderState, 
 			if usage[currentProvider] >= 100 {
 				reason = currentProvider + " usage is exhausted"
 			}
-			plan = append(plan, hivev1.RotationDecision{Agent: agent.Name, FromBackend: agent.Backend, FromModel: agent.Model, ToProvider: rung.Provider, ToBackend: rung.Backend, ToModel: rung.Model, ToEffort: rung.Effort, Reason: reason})
+			plan = append(plan, hivev1.RotationDecision{Agent: agent.Name, FromBackend: agent.Backend, FromModel: agent.Model, FromEffort: agent.Effort, ToProvider: rung.Provider, ToBackend: rung.Backend, ToModel: rung.Model, ToEffort: rung.Effort, Reason: reason})
 			break
 		}
 	}
@@ -328,15 +333,25 @@ func (r *HiveSpokeReconciler) applyRotation(ctx context.Context, sp *hivev1.Hive
 		}
 		return nil
 	}
-	if err := post("/api/switch/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.ToBackend), "switched"); err != nil {
-		return err.Error()
+	if d.FromBackend != d.ToBackend {
+		if err := post("/api/switch/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.ToBackend), "switched"); err != nil {
+			return err.Error()
+		}
 	}
-	if err := post("/api/model/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.ToModel), "model_set"); err != nil {
-		_, _ = r.Hive.Post(ctx, sp.Spec.Namespace, pod, session, "/api/switch/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.FromBackend))
-		return "model change failed and backend was rolled back: " + err.Error()
+	if d.FromModel != d.ToModel {
+		if err := post("/api/model/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.ToModel), "model_set"); err != nil {
+			if d.FromBackend != d.ToBackend {
+				_, _ = r.Hive.Post(ctx, sp.Spec.Namespace, pod, session, "/api/switch/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.FromBackend))
+			}
+			return "model change failed and backend was rolled back: " + err.Error()
+		}
 	}
-	if d.ToEffort != "" {
-		if err := post("/api/effort/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.ToEffort), "effort_set"); err != nil {
+	if d.FromEffort != d.ToEffort {
+		effort := d.ToEffort
+		if effort == "" {
+			effort = "default"
+		}
+		if err := post("/api/effort/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(effort), "effort_set"); err != nil {
 			return "placement changed but effort change failed: " + err.Error()
 		}
 	}
