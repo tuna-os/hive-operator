@@ -119,6 +119,20 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// /api/status can lag switch/model writes. The persisted override journal is
+	// the authority used at the next launch, so shadow decisions must overlay it
+	// or they will certify invalid pairs such as codex + muse-spark as healthy.
+	type runtimeAgent struct {
+		Backend string `json:"backend_override"`
+		Model   string `json:"model_override"`
+	}
+	var runtimeState struct {
+		Agents map[string]runtimeAgent `json:"agents"`
+	}
+	if out, err := r.Hive.Sh(ctx, sp.Spec.Namespace, pod, "cat /data/hive-state.json 2>/dev/null"); err == nil {
+		_ = json.Unmarshal([]byte(out), &runtimeState)
+	}
+
 	pinned := map[string]bool{}
 	for _, p := range sp.Spec.Pins {
 		pinned[p.Agent] = true
@@ -128,6 +142,14 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	sp.Status.Agents = nil
 	metrics.AgentIdleSeconds.Reset()
 	for _, a := range sr.Agents {
+		if persisted, ok := runtimeState.Agents[a.Name]; ok {
+			if persisted.Backend != "" {
+				a.CLI = persisted.Backend
+			}
+			if persisted.Model != "" {
+				a.Model = persisted.Model
+			}
+		}
 		od := a.OnDemand != nil && *a.OnDemand
 		st := hivev1.AgentState{
 			Name: a.Name, Backend: a.CLI, Model: a.Model, Effort: a.Effort, Mode: a.Mode,
