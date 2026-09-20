@@ -7,7 +7,7 @@ Before promotion, inspect every proposed plan and controller errors:
 
 ```sh
 kubectl get hivespokes -o yaml
-kubectl -n hive-operator-system logs deploy/hive-operator-controller-manager --since=24h
+kubectl -n hive-system logs deploy/hive-operator --since=24h
 ```
 
 Promote only when every proposed backend/model exists in live inventory, no
@@ -22,8 +22,8 @@ for spoke in school reef hanthor; do
   kubectl patch hivespoke "$spoke" --type merge -p '{"spec":{"rotationMode":"Enforce"}}'
 done
 kubectl -n hive patch cronjob hive-rotate -p '{"spec":{"suspend":true}}'
-kubectl -n hive-reef patch cronjob hive-rotate-reef -p '{"spec":{"suspend":true}}'
-kubectl -n hive-hanthor patch cronjob hive-rotate-hanthor -p '{"spec":{"suspend":true}}'
+kubectl -n hive patch cronjob hive-rotate-reef -p '{"spec":{"suspend":true}}'
+kubectl -n hive patch cronjob hive-rotate-hanthor -p '{"spec":{"suspend":true}}'
 ```
 
 To roll back, set every spoke to `Shadow` and set the three CronJobs' `suspend`
