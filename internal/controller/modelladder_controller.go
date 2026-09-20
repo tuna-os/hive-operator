@@ -75,7 +75,7 @@ func (r *ModelLadderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			dropped = append(dropped, fmt.Sprintf("%s/%s: incomplete rung", rung.Provider, rung.Model))
 			continue
 		}
-		key := strings.ToLower(rung.Provider + "\x00" + rung.Model + "\x00" + rung.Effort)
+		key := rungIdentity(rung)
 		if seen[key] {
 			continue
 		}
@@ -105,6 +105,13 @@ func (r *ModelLadderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: iv}, nil
+}
+
+// rungIdentity keeps the same model available in multiple tiers. Tier is part
+// of placement policy, while effort distinguishes materially different cost
+// and quality choices within a tier.
+func rungIdentity(rung hivev1.Rung) string {
+	return strings.ToLower(strings.Join([]string{rung.Tier, rung.Provider, rung.Model, rung.Effort}, "\x00"))
 }
 
 func (r *ModelLadderReconciler) inventory(ctx context.Context, ladder *hivev1.ModelLadder) (map[string]map[string]bool, error) {

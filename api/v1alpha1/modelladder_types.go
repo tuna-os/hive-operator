@@ -85,8 +85,8 @@ type ModelLadderStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// Effective is rank(benchmark) UNION builtin, then gated by the live
-	// inventory. De-duplicated on provider+model+effort: the same model at low
-	// and high effort is a different capacity and cost choice.
+	// inventory. De-duplicated on tier+provider+model+effort: a model can be a
+	// valid fallback at several tiers, and effort changes capacity and cost.
 	// +optional
 	Effective []Rung `json:"effective,omitempty"`
 	// Dropped rungs and why — the audit trail for "why is nothing at T1".
