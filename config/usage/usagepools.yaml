@@ -1,0 +1,57 @@
+# One UsagePool per provider ACCOUNT. Observe-only: they measure; rotation
+# reads them only when a HiveSpoke sets rotationUsageSource: UsagePool.
+#
+# Limits are left empty (learned): consumption is calibrated against the
+# provider reading in hive/hive-provider-usage while the bash probes still
+# publish it. Configure `limit` only when the provider documents one.
+apiVersion: hive.tunaos.org/v1alpha1
+kind: UsagePool
+metadata:
+  name: anthropic
+spec:
+  provider: anthropic
+  unit: costUSD
+  windows:
+    - {name: 5h, duration: 5h, readingSlot: slot0}
+    - {name: weekly, duration: 168h, readingSlot: slot1}
+  reading: {namespace: hive, name: hive-provider-usage}
+---
+apiVersion: hive.tunaos.org/v1alpha1
+kind: UsagePool
+metadata:
+  name: openai
+spec:
+  provider: openai
+  unit: costUSD
+  windows:
+    # The probe collapses codex's primary/secondary windows to the worse one
+    # (weekly while exhausted); calibrate the weekly window from it.
+    - {name: weekly, duration: 168h}
+  reading: {namespace: hive, name: hive-provider-usage}
+---
+apiVersion: hive.tunaos.org/v1alpha1
+kind: UsagePool
+metadata:
+  name: google
+spec:
+  provider: google
+  unit: costUSD
+  windows:
+    # agy's "Gemini Models" quota group resets on its own clock; 5h matches
+    # the observed reset spacing — revisit once a week of readings exists.
+    - {name: 5h, duration: 5h}
+    - {name: daily, duration: 24h}
+  reading: {namespace: hive, name: hive-provider-usage}
+---
+apiVersion: hive.tunaos.org/v1alpha1
+kind: UsagePool
+metadata:
+  name: deepseek
+spec:
+  provider: deepseek
+  unit: costUSD
+  # DeepSeek is prepaid balance, not a window: the reading is 0% or 100%.
+  # The daily window here is for burn rate and per-agent attribution only.
+  windows:
+    - {name: daily, duration: 24h}
+  reading: {namespace: hive, name: hive-provider-usage}
