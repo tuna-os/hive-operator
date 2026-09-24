@@ -4,8 +4,13 @@ A Kubernetes operator for the tuna-os Hive fleet: the rotation, healing,
 credential-sharing and pacing that currently run as ~12 shell CronJobs, modelled
 as CRDs and controllers, with Prometheus metrics and a fleet dashboard.
 
-**Status: early.** Two controllers exist. `HiveSpoke` is observe-only.
-`SharedAuth` defaults to Shadow. Nothing has been cut over yet.
+**Status: early.** Nothing has been cut over yet. The controllers:
+
+- `HiveSpoke` observes each spoke and plans rotation in Shadow.
+- `SharedAuth` and `ModelLadder` default to Shadow.
+- `UsagePool` is observe-only.
+
+Provider usage comes from agent session logs via [ccusage](https://github.com/ccusage/ccusage), read by the `hive-usage` sidecar. [DESIGN.md](DESIGN.md) covers the architecture, the Phase 0 measurements and the per-CronJob cut-over plan.
 
 ## Why
 
@@ -31,6 +36,7 @@ point of this project; the controllers are how the numbers stay honest.
   what the backends actually offer.
 - **`SharedAuth`** — one credential store shared across spokes, verified by
   write-through.
+- **`UsagePool`** — one provider *account's* quota windows. Consumption comes from session logs (hive-usage sidecar + ccusage). The limit is configured or learned from the provider's own reading. Status carries remaining, burn rate and ETA, per agent.
 
 ### Reconcile modes
 
@@ -109,6 +115,12 @@ plus numeric offset), so age arithmetic belongs in the hive pod, which has GNU
 date. A checker that silently `continue`s on every agent prints exactly what a
 healthy fleet prints.
 
+**A pool is an account, not a spoke.** `.claude`, `.gemini` and `.codex` are RWX PVCs mounted by every spoke, and the contributor pods use the Claude one too. Every spoke's sidecar reads the same store. Count it once, by content fingerprint. Mount identity differs per pod for the same directory (st_dev 65 vs 66), so it can't be used.
+
+**ccusage measures spend, never headroom.** No log says how much quota is left. Remaining quota is limit − consumption. The limit is learned by calibrating against the provider's reading, and that is only as good as ccusage's pricing: an unpriced model counts $0. `claude-opus-5-5` zeroed a whole 5h window. Watch `Priced=False`.
+
+**ccusage ignores symlinked files, and Antigravity is slow.** A "recent files" symlink view reads as empty. One pass over 500 agy conversation DBs takes about 3 CPU-minutes.
+
 **Unmeasured ≠ exhausted.** An unmeasured provider must stay eligible; a
 positive reading at 100 must evacuate. Conflating them either strands a healthy
 fleet or keeps filling a dead pool. `-1` is the sentinel.
@@ -120,6 +132,16 @@ fleet or keeps filling a dead pool. `-1` is the sentinel.
 `hive_budget_exhausted`, `hive_shared_auth_consistent{namespace,dir}`,
 `hive_credential_present`, `hive_spoke_reachable`, `hive_reconcile_mode`,
 `hive_actions_total{applied}`, `hive_reconcile_errors_total`.
+
+Usage (operator):
+- `hive_provider_usage_ratio`, `hive_pool_used_percent{source}`, `hive_provider_reading_percent`
+- `hive_provider_{consumed,remaining,limit,burn_per_hour}`, `hive_provider_exhaustion_eta_seconds`
+- `hive_agent_usage`, `hive_usage_source_up`, `hive_rotation_plan_decisions`
+
+Usage (sidecar, `:9464/metrics`):
+- `hive_usage_tokens_total`, `hive_usage_cost_usd_total`
+- `hive_usage_window_{cost_usd,tokens}`
+- `hive_usage_collect_{success,duration_seconds}`, `hive_usage_unpriced_model`
 
 Two alerts worth having on day one:
 
@@ -144,16 +166,34 @@ kubectl apply -f config/crd
 kubectl apply -f config/rbac
 kubectl apply -f config/manager
 kubectl apply -f config/samples/fleet.yaml
+kubectl apply -f config/usage/usagepools.yaml
 ```
+
+The usage sidecar (`cmd/hive-usage`, image `ghcr.io/tuna-os/hive-operator/hive-usage`, built from `Dockerfile.usage`) goes into each spoke's hive Deployment via `config/usage/hive-usage-patch.yaml`. To try it on copied logs:
+
+```bash
+go run ./cmd/hive-usage --once --home /path/to/copy/of/data/home --ccusage "$(which ccusage)" --state ""
+```
+
+### Shadow diff against the bash rotate job
+
+```bash
+kubectl -n hive logs job/<latest hive-rotate job> > bash.log
+kubectl get hivespoke school -o json > spoke.json
+go run ./cmd/hive-shadow-diff --bash bash.log --spoke spoke.json   # exit 0 = identical
+```
+
+See DESIGN.md §7 for how to classify a difference before calling it a bug.
 
 ## Roadmap
 
 1. ~~`SharedAuth` (shadow)~~ — done; promote to Enforce and suspend
    `hive-shared-auth`.
 2. `ModelLadder` — inventory gate + benchmark union + band derivation.
-3. `Rotation` — provider probes and placement. The big one: ~1400 lines of
-   conditionals in `hive-rotate.sh`, each earned by an incident. Port with the
-   script open beside you, not from memory.
+3. `Rotation` — placement ported rule-for-rule into `internal/rotation` (Shadow).
+   Golden tests reproduce the bash job logs. Enforce is unwired: see DESIGN.md §6.
+   Provider probes are being replaced by `UsagePool` (ccusage) and, upstream,
+   hive v5's `/api/providers/headroom`.
 4. `Watchdog` — pane classification and healing.
 5. `Nudge` — the budget-aware kick backstop.
 6. `Pace` — burn-rate pacing.
