@@ -1,0 +1,109 @@
+{
+ "sessions": [
+  {
+   "cacheCreationTokens": 15813,
+   "cacheReadTokens": 32194,
+   "firstActivity": "2026-09-07T03:20:25.319Z",
+   "inputTokens": 2,
+   "lastActivity": "2026-09-07T03:20:25.319Z",
+   "modelBreakdowns": [
+    {
+     "cacheCreationTokens": 15813,
+     "cacheReadTokens": 32194,
+     "cost": 0.0697848,
+     "inputTokens": 2,
+     "modelName": "claude-sonnet-5",
+     "outputTokens": 9
+    }
+   ],
+   "modelsUsed": [
+    "claude-sonnet-5"
+   ],
+   "outputTokens": 9,
+   "projectPath": "-data-agents-telemetry",
+   "sessionId": "97f57c02-4857-4708-9903-06705e49025d",
+   "totalCost": 0.0697848,
+   "totalTokens": 48018
+  },
+  {
+   "cacheCreationTokens": 15254,
+   "cacheReadTokens": 32194,
+   "firstActivity": "2026-09-06T05:41:19.431Z",
+   "inputTokens": 2,
+   "lastActivity": "2026-09-06T05:41:19.431Z",
+   "modelBreakdowns": [
+    {
+     "cacheCreationTokens": 15254,
+     "cacheReadTokens": 32194,
+     "cost": 0.06901879999999999,
+     "inputTokens": 2,
+     "modelName": "claude-sonnet-5",
+     "outputTokens": 156
+    }
+   ],
+   "modelsUsed": [
+    "claude-sonnet-5"
+   ],
+   "outputTokens": 156,
+   "projectPath": "-data-agents-supervisor",
+   "sessionId": "6e578e67-1f97-43d6-b351-c992b6f72907",
+   "totalCost": 0.06901879999999999,
+   "totalTokens": 47606
+  },
+  {
+   "cacheCreationTokens": 15259,
+   "cacheReadTokens": 32194,
+   "firstActivity": "2026-09-06T13:35:17.409Z",
+   "inputTokens": 2,
+   "lastActivity": "2026-09-06T13:35:17.409Z",
+   "modelBreakdowns": [
+    {
+     "cacheCreationTokens": 15259,
+     "cacheReadTokens": 32194,
+     "cost": 0.0675688,
+     "inputTokens": 2,
+     "modelName": "claude-sonnet-5",
+     "outputTokens": 9
+    }
+   ],
+   "modelsUsed": [
+    "claude-sonnet-5"
+   ],
+   "outputTokens": 9,
+   "projectPath": "-data-agents-supervisor",
+   "sessionId": "52ea1fba-13d6-4c93-8e20-f7ff679dd8ca",
+   "totalCost": 0.0675688,
+   "totalTokens": 47464
+  },
+  {
+   "cacheCreationTokens": 9367,
+   "cacheReadTokens": 18006,
+   "firstActivity": "2026-09-02T15:25:18.902Z",
+   "inputTokens": 10,
+   "lastActivity": "2026-09-02T15:25:18.902Z",
+   "modelBreakdowns": [
+    {
+     "cacheCreationTokens": 9367,
+     "cacheReadTokens": 18006,
+     "cost": 0.0207946,
+     "inputTokens": 10,
+     "modelName": "claude-haiku-4-5-20251001",
+     "outputTokens": 50
+    }
+   ],
+   "modelsUsed": [
+    "claude-haiku-4-5-20251001"
+   ],
+   "outputTokens": 50,
+   "projectPath": "-",
+   "sessionId": "a92e04f5-ce32-4e43-9665-fea8f7c68bc1",
+   "totalCost": 0.0207946,
+   "totalTokens": 27433
+  }
+ ],
+ "totals": {
+  "unpricedModels": [
+   "claude-opus-5-5"
+  ]
+ }
+}

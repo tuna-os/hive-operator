@@ -57,3 +57,24 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The hive-usage sidecar: same repo, same tags, separate image, so the
+      # sidecar in the hive pods and the operator can be rolled independently.
+      - id: meta-usage
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/hive-usage
+          tags: |
+            type=raw,value=dev,enable={{is_default_branch}}
+            type=sha,format=short
+            type=ref,event=tag
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.usage
+          push: true
+          tags: ${{ steps.meta-usage.outputs.tags }}
+          labels: ${{ steps.meta-usage.outputs.labels }}
+          cache-from: type=gha,scope=hive-usage
+          cache-to: type=gha,mode=max,scope=hive-usage

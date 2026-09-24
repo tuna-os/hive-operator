@@ -3,7 +3,7 @@
 CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0
 IMG ?= ghcr.io/tuna-os/hive-operator:dev
 
-.PHONY: all build test fmt vet generate manifests docker-build deploy undeploy run
+.PHONY: all build test fmt vet generate manifests docker-build docker-build-usage deploy undeploy run
 all: generate manifests build
 
 generate:
@@ -19,7 +19,9 @@ build: fmt vet ; go build -o bin/manager ./cmd
 
 run: ; go run ./cmd --leader-elect=false --dashboard-bind-address=:8082
 
+USAGE_IMG ?= ghcr.io/tuna-os/hive-operator/hive-usage:dev
 docker-build: ; docker build -t $(IMG) .
+docker-build-usage: ; docker build -f Dockerfile.usage -t $(USAGE_IMG) .
 
 deploy: manifests
 	kubectl apply -f config/crd
