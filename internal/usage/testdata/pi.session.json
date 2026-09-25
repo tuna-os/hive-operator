@@ -1,0 +1,55 @@
+{
+ "sessions": [
+  {
+   "cacheCreationTokens": 0,
+   "cacheReadTokens": 12974080,
+   "firstActivity": "2026-08-23T23:38:44.629Z",
+   "inputTokens": 88022,
+   "lastActivity": "2026-08-24T00:03:30.809Z",
+   "modelBreakdowns": [
+    {
+     "cacheCreationTokens": 0,
+     "cacheReadTokens": 12974080,
+     "cost": 0.06711426399999999,
+     "inputTokens": 88022,
+     "modelName": "[pi] deepseek-v4-flash",
+     "outputTokens": 65942
+    }
+   ],
+   "modelsUsed": [
+    "[pi] deepseek-v4-flash"
+   ],
+   "outputTokens": 65942,
+   "projectPath": "--data-agents-sec-check--",
+   "sessionId": "01a030fb-f305-736e-97e4-cbb84929a186",
+   "totalCost": 0.06711426399999999,
+   "totalTokens": 13128044
+  },
+  {
+   "cacheCreationTokens": 0,
+   "cacheReadTokens": 2701568,
+   "firstActivity": "2026-08-23T23:52:33.770Z",
+   "inputTokens": 52798,
+   "lastActivity": "2026-08-24T00:04:17.837Z",
+   "modelBreakdowns": [
+    {
+     "cacheCreationTokens": 0,
+     "cacheReadTokens": 2701568,
+     "cost": 0.0261213904,
+     "inputTokens": 52798,
+     "modelName": "[pi] deepseek-v4-flash",
+     "outputTokens": 39876
+    }
+   ],
+   "modelsUsed": [
+    "[pi] deepseek-v4-flash"
+   ],
+   "outputTokens": 39876,
+   "projectPath": "--data-agents-strategist--",
+   "sessionId": "01a03109-ffe4-73ec-9f7d-a0f32605bf08",
+   "totalCost": 0.0261213904,
+   "totalTokens": 2794242
+  }
+ ],
+ "totals": {}
+}

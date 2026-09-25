@@ -1,0 +1,62 @@
+# Strategic-merge patch adding the hive-usage sidecar to a spoke's hive
+# Deployment. Apply per spoke namespace (hive, hive-reef, hive-hanthor):
+#
+#   kubectl -n <ns> patch deploy hive --type strategic --patch-file config/usage/hive-usage-patch.yaml
+#
+# Safe alongside hive-upgrade: that job patches container `hive` BY NAME with
+# a strategic merge (containers merge on `name`), reads only that container's
+# status, and never indexes containers[0]. The sidecar is appended after
+# `hive`, has no readiness probe (it can never hold the pod NotReady), and
+# mounts every data volume readOnly.
+#
+# The Deployments use strategy Recreate: applying this restarts the hive pod
+# (agents restart). Apply between rotate ticks (:00/:20/:40 school, :07 reef,
+# :14 hanthor) and not while hive-upgrade (04:30 America/New_York) runs.
+spec:
+  template:
+    spec:
+      containers:
+        - name: hive-usage
+          image: ghcr.io/tuna-os/hive-operator/hive-usage:sha-REPLACE_ME
+          args:
+            - --home=/data/home
+            - --interval=5m
+            - --slow-interval=15m   # antigravity: ~0.5 s per conversation DB, 500 DBs
+            - --state=/var/lib/hive-usage/ledger.json
+            - --scratch=/var/lib/hive-usage/tmp
+            - --ccusage-config=/etc/hive-usage/ccusage.json   # pricingOverrides; see ccusage-config.yaml
+          env:
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          ports:
+            - {name: usage, containerPort: 9464}
+          securityContext:
+            # Agent logs are dev:node (1001:1000), 660 files in 2770 dirs:
+            # group read is all we need. Never root, never write.
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          livenessProbe:
+            httpGet: {path: /healthz, port: 9464}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data, readOnly: true}
+            - {name: sc, mountPath: /data/home/.claude, readOnly: true}
+            - {name: sg, mountPath: /data/home/.gemini, readOnly: true}
+            - {name: usage-scratch, mountPath: /var/lib/hive-usage}
+            - {name: hive-usage-ccusage, mountPath: /etc/hive-usage, readOnly: true}
+      volumes:
+        - name: usage-scratch
+          emptyDir: {sizeLimit: 256Mi}
+        - name: hive-usage-ccusage
+          configMap: {name: hive-usage-ccusage, optional: true}   # absent: default pricing

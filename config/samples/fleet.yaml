@@ -24,6 +24,7 @@ spec:
   ladderRef: fleet
   rotationMode: Shadow
   budget: {weeklyTokens: 0}      # uncapped
+  holds: [reviewer]              # = HIVE_ROTATE_HOLD on the hive-rotate CronJob
   pins:
     - agent: supervisor
       backend: codex
@@ -53,6 +54,7 @@ spec:
   primarySpoke: hive
   ladderRef: fleet
   rotationMode: Shadow
+  holds: [reviewer]              # = HIVE_ROTATE_HOLD on hive-rotate-hanthor
   repos: [indiafoss-companion, indiafoss-chat-android, dotfiles, hummingbird-github, reilly.asia, homebrew-tap]
 ---
 apiVersion: hive.tunaos.org/v1alpha1
@@ -65,16 +67,26 @@ spec:
     namespace: hive
     name: hive-model-inventory
     key: inventory.tsv
+  # hive-rotate.sh's built-in TIERS table (lines 191-208), row for row and in
+  # order: Rotation shadows the bash job, so the ladder must be the same
+  # table or every diff line is a ladder difference, not a logic one. The
+  # primary hive's bash job also unions the hive-tiers cache
+  # (/state/hive-rotate/tiers.tsv, Artificial Analysis) in front of these —
+  # see DESIGN.md "ladder parity" before judging T1 diffs on school.
   builtin:
     - {tier: T1, provider: google, backend: agy, model: gemini-3.8-flash-high, effort: high, source: builtin}
     - {tier: T1, provider: deepseek, backend: pi, model: deepseek-flash, source: builtin}
     - {tier: T1, provider: openai, backend: codex, model: gpt-5.6-sol, effort: high, source: builtin}
     - {tier: T1, provider: anthropic, backend: claude, model: claude-opus-5, source: builtin}
-    - {tier: T2, provider: google, backend: agy, model: gemini-3.8-flash-low, effort: medium, source: builtin}
+    - {tier: T2, provider: google, backend: agy, model: gemini-3.8-flash-low, effort: low, source: builtin}
     - {tier: T2, provider: deepseek, backend: pi, model: deepseek-flash, source: builtin}
     - {tier: T2, provider: openai, backend: codex, model: gpt-5.6-luna, effort: medium, source: builtin}
     - {tier: T2, provider: anthropic, backend: claude, model: claude-sonnet-5, source: builtin}
+    - {tier: T2, provider: google, backend: agy, model: gemini-3.6-flash-low, effort: low, source: builtin}
+    - {tier: T2, provider: meta, backend: muse, model: muse-spark-1.3-contributor, source: builtin}
     - {tier: T3, provider: google, backend: agy, model: gemini-3.8-flash-low, effort: low, source: builtin}
     - {tier: T3, provider: deepseek, backend: pi, model: deepseek-flash, source: builtin}
     - {tier: T3, provider: openai, backend: codex, model: gpt-5.6-luna, effort: low, source: builtin}
     - {tier: T3, provider: anthropic, backend: claude, model: claude-haiku-4-5-20251001, source: builtin}
+    - {tier: T3, provider: google, backend: agy, model: gemini-3.6-flash-low, effort: low, source: builtin}
+    - {tier: T3, provider: meta, backend: muse, model: muse-spark-1.3-contributor, source: builtin}

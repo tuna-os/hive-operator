@@ -107,6 +107,77 @@ var (
 		Help: "Actions a controller decided on, by kind and whether they were applied.",
 	}, []string{"controller", "object", "action", "applied"})
 
+	// UsageRatio is a pool window's consumption over its limit (configured or
+	// learned). -1 means there is no limit to compare against — NOT exhausted.
+	UsageRatio = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_provider_usage_ratio",
+		Help: "Pool window consumption / limit, from session logs (ccusage). -1: no limit known.",
+	}, []string{"pool", "provider", "window"})
+
+	// UsedPercentPool is what rotation would read: the provider's own
+	// reading when fresh, else 100×ratio, else -1.
+	UsedPercentPool = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_pool_used_percent",
+		Help: "Pool window used percent as rotation consumes it; source=ccleft|reading|ccusage. -1 unmeasured.",
+	}, []string{"pool", "provider", "window", "source"})
+
+	// ReadingPercent is the provider-reported figure alone, for comparing
+	// against the ccusage-derived ratio (the shadow check for the probes).
+	ReadingPercent = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_provider_reading_percent",
+		Help: "Provider-reported used percent for the window (probe/headroom). -1 absent or stale.",
+	}, []string{"pool", "provider", "window"})
+
+	// Remaining is limit − consumed, in the pool's unit.
+	Remaining = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_provider_remaining",
+		Help: "Pool window limit minus consumption, in the pool's unit. -1: no limit known.",
+	}, []string{"pool", "provider", "window", "unit"})
+
+	// Consumed is the window's consumption, in the pool's unit.
+	Consumed = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_provider_consumed",
+		Help: "Pool window consumption from session logs, in the pool's unit.",
+	}, []string{"pool", "provider", "window", "unit"})
+
+	// Limit is the limit in force and where it came from.
+	Limit = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_provider_limit",
+		Help: "Pool window limit in the pool's unit; source=configured|learned.",
+	}, []string{"pool", "provider", "window", "unit", "source"})
+
+	// BurnPerHour is recent consumption per hour.
+	BurnPerHour = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_provider_burn_per_hour",
+		Help: "Pool consumption over the last hour, per hour, in the pool's unit.",
+	}, []string{"pool", "provider", "window", "unit"})
+
+	// ExhaustionETA is seconds until the window's limit is reached at the
+	// current burn; -1 when it will not be reached before the window resets.
+	ExhaustionETA = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_provider_exhaustion_eta_seconds",
+		Help: "Seconds until the pool window is exhausted at the current burn. -1: not before reset / unknown.",
+	}, []string{"pool", "provider", "window"})
+
+	// AgentUsage is per-agent consumption within a pool window.
+	AgentUsage = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_agent_usage",
+		Help: "Per-agent consumption in the pool window, in the pool's unit (fleet-wide for shared stores).",
+	}, []string{"pool", "provider", "agent", "window", "unit"})
+
+	// UsageSourceUp is 1 when a sidecar source was read successfully.
+	UsageSourceUp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_usage_source_up",
+		Help: "1 if the hive-usage sidecar source answered; counted=false marks a duplicate shared store.",
+	}, []string{"pool", "namespace", "source", "counted"})
+
+	// RotationDecisions is the current plan, by action. In Shadow these are
+	// what WOULD happen; hive_actions_total{applied} counts what did.
+	RotationDecisions = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_rotation_plan_decisions",
+		Help: "Decisions in the spoke's current rotation plan, by action (move/strand/resume/canary).",
+	}, []string{"spoke", "action", "applied"})
+
 	// ReconcileErrors counts failures per controller.
 	ReconcileErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hive_reconcile_errors_total",
@@ -122,6 +193,8 @@ func Register() {
 		ProviderUsedPercent, BudgetUsedTokens, BudgetLimitTokens, BudgetExhausted,
 		SharedAuthConsistent, CredentialPresent,
 		ReconcileMode, ActionsTotal, ReconcileErrors,
+		UsageRatio, UsedPercentPool, ReadingPercent, Remaining, Consumed, Limit,
+		BurnPerHour, ExhaustionETA, AgentUsage, UsageSourceUp, RotationDecisions,
 	)
 }
 

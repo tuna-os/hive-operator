@@ -1,0 +1,478 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: usagepools.hive.tunaos.org
+spec:
+  group: hive.tunaos.org
+  names:
+    kind: UsagePool
+    listKind: UsagePoolList
+    plural: usagepools
+    shortNames:
+    - pool
+    singular: usagepool
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.provider
+      name: Provider
+      type: string
+    - jsonPath: .status.windows[0].usedPercent
+      name: Used%
+      type: string
+    - jsonPath: .status.windows[0].name
+      name: Window
+      type: string
+    - jsonPath: .status.windows[0].limitSource
+      name: Limit
+      type: string
+    - jsonPath: .status.observedAt
+      name: Observed
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: UsagePool is one provider account's quota, measured from session
+          logs.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              UsagePoolSpec describes one provider account whose quota several agents —
+              possibly on several spokes — draw on.
+
+              A pool is an ACCOUNT, not a spoke: the fleet's Claude, Gemini/Antigravity and
+              Codex logins live on RWX PVCs shared by every spoke (and by the
+              hive-contributors pods), so one 5-hour Claude window is spent by all of them
+              together. The sidecar in each spoke reads the same shared store; the
+              controller counts each store once, by content fingerprint.
+            properties:
+              ccleft:
+                description: |-
+                  Ccleft reads the provider's own remaining/limit/reset per window from
+                  ccleft. When set it is preferred; Reading (the ConfigMap) is the
+                  per-window fallback while ccleft is unreachable, has no usable reading
+                  for this account, or has no matching window.
+                properties:
+                  account:
+                    description: |-
+                      Account pins one account fingerprint when ccleft serves several for
+                      this provider. Empty: exactly one account is required.
+                    type: string
+                  maxAge:
+                    description: |-
+                      MaxAge beyond which a reading's measurement (fetched_at — for a stale
+                      last-good reading, the time of the last good measurement) is ignored.
+                      Default 30m.
+                    type: string
+                  provider:
+                    description: |-
+                      Provider is ccleft's provider name. Default derived from the pool's:
+                      anthropic→claude, openai→codex, google→agy, github→copilot,
+                      meta→muse, kiro→kiro, deepseek→deepseek.
+                    type: string
+                  scope:
+                    description: |-
+                      Scope restricts automatic window matching to one ccleft scope, e.g.
+                      "gemini" for agy's Gemini pool (agy also reports a "3p" pool for
+                      Claude/GPT models on the same account).
+                    type: string
+                  url:
+                    description: |-
+                      URL of ccleft serve, e.g. http://ccleft.hive.svc:9464. GET /readings is
+                      read from it.
+                    type: string
+                required:
+                - url
+                type: object
+              mode:
+                default: Observe
+                description: |-
+                  Mode: only Observe is meaningful — a pool measures, it never acts.
+                  Rotation consumes pools; see HiveSpoke.spec.rotationUsageSource.
+                enum:
+                - Observe
+                - Shadow
+                - Enforce
+                type: string
+              namespaces:
+                description: |-
+                  Namespaces whose hive-usage sidecars are read. Default: every
+                  HiveSpoke's namespace.
+                items:
+                  type: string
+                type: array
+              provider:
+                description: 'Provider: anthropic, openai, google, deepseek, meta,
+                  github.'
+                type: string
+              reading:
+                description: |-
+                  Reading is the provider-reported "% used" used for calibration and,
+                  while it exists, as the authoritative UsedPercent. Transitional: today
+                  it is the bash probe's ConfigMap; see DESIGN.md for retiring it.
+                properties:
+                  key:
+                    description: Key is the provider key; defaults to the pool's provider.
+                    type: string
+                  maxAge:
+                    description: MaxAge beyond which a reading is ignored as stale.
+                      Default 30m.
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
+              sidecarPort:
+                description: SidecarPort is where hive-usage listens in each hive
+                  pod. Default 9464.
+                format: int32
+                type: integer
+              sources:
+                description: |-
+                  Sources are the ccusage sources whose rows count against this pool;
+                  rows are further filtered to this provider by model (pi fronts several).
+                  Default: derived from the provider (anthropic→claude, openai→codex,
+                  google→antigravity+gemini, deepseek→pi+goose).
+                items:
+                  type: string
+                type: array
+              unit:
+                description: 'Unit the limits are in: costUSD (default), tokens, outputTokens.'
+                enum:
+                - costUSD
+                - tokens
+                - outputTokens
+                type: string
+              windows:
+                description: Windows are the provider's quota windows.
+                items:
+                  description: UsageWindowSpec is one quota window of a provider account.
+                  properties:
+                    ccleftWindow:
+                      description: |-
+                        CcleftWindow selects the ccleft window (Reading.windows[].id, e.g.
+                        "five_hour", "seven_day", "weekly", "gemini-5h", "plan") that feeds this
+                        window when spec.ccleft is set. Empty: the binding window whose kind
+                        matches Duration (≤6h five_hour, ≤48h daily, ≤14d weekly, else
+                        monthly), restricted to spec.ccleft.scope.
+                      type: string
+                    duration:
+                      description: |-
+                        Duration of the window. When the provider reading carries a reset time
+                        the window is anchored on it (start = resetsAt − duration); otherwise it
+                        rolls back from now.
+                      type: string
+                    limit:
+                      description: |-
+                        Limit, in the pool's Unit, as a decimal string. Empty means learn it by
+                        calibrating consumption against the provider reading. A configured limit
+                        always wins; configure one only when the provider documents it — a
+                        guessed limit is worse than a learned one.
+                      type: string
+                    name:
+                      description: 'Name labels the window in status and metrics:
+                        "5h", "weekly", "daily".'
+                      type: string
+                    readingSlot:
+                      description: |-
+                        ReadingSlot selects which of the provider reading's windows calibrates
+                        this one. Anthropic publishes several (anthropic_limits, ordered by
+                        reset: slot0 = 5-hour session, slot1 = weekly); others publish one
+                        (leave empty).
+                      type: string
+                  required:
+                  - duration
+                  - name
+                  type: object
+                type: array
+            required:
+            - provider
+            - windows
+            type: object
+          status:
+            description: UsagePoolStatus is the measured state of the pool.
+            properties:
+              account:
+                description: Account is the provider account behind the pool, from
+                  ccleft.
+                properties:
+                  account:
+                    description: Account is ccleft's non-secret account fingerprint.
+                    type: string
+                  cause:
+                    type: string
+                  error:
+                    description: Error explains why ccleft could not be used (the
+                      fallback reason).
+                    type: string
+                  fetchedAt:
+                    format: date-time
+                    type: string
+                  homes:
+                    description: Homes that ccleft resolved to this account.
+                    items:
+                      type: string
+                    type: array
+                  plan:
+                    type: string
+                  provider:
+                    type: string
+                  retryAt:
+                    format: date-time
+                    type: string
+                  source:
+                    description: 'Source of the reading: ccleft, or configmap when
+                      ccleft was unusable.'
+                    type: string
+                  stale:
+                    description: |-
+                      Stale: ccleft served its last good measurement during an upstream
+                      failure (429 etc.); FetchedAt is that measurement's time.
+                    type: boolean
+                  state:
+                    description: |-
+                      State: ok, limited, exhausted, rate_limited, auth_required,
+                      unsupported, error.
+                    type: string
+                required:
+                - source
+                - stale
+                type: object
+              agents:
+                items:
+                  description: AgentUsage is one agent's consumption in a pool window.
+                  properties:
+                    agent:
+                      type: string
+                    consumed:
+                      description: Consumed in the pool's unit.
+                      type: string
+                    models:
+                      description: Models seen, most-consuming first.
+                      items:
+                        type: string
+                      type: array
+                    share:
+                      description: Share of the pool's consumption in this window,
+                        0-1.
+                      type: string
+                    window:
+                      type: string
+                  required:
+                  - agent
+                  - consumed
+                  - share
+                  - window
+                  type: object
+                type: array
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              observedAt:
+                format: date-time
+                type: string
+              sources:
+                items:
+                  description: UsageSourceStatus is one sidecar source as the controller
+                    last read it.
+                  properties:
+                    counted:
+                      description: |-
+                        Counted is false when another namespace's sidecar already supplied the
+                        same store (same fingerprint): counting it again would double the pool.
+                      type: boolean
+                    error:
+                      type: string
+                    fingerprint:
+                      type: string
+                    lastSuccess:
+                      format: date-time
+                      type: string
+                    namespace:
+                      type: string
+                    ok:
+                      type: boolean
+                    primed:
+                      type: boolean
+                    source:
+                      type: string
+                    unpricedModels:
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - counted
+                  - namespace
+                  - ok
+                  - primed
+                  - source
+                  type: object
+                type: array
+              windows:
+                items:
+                  description: |-
+                    UsageWindowStatus is one evaluated window. Numbers are decimal strings in
+                    the pool's unit, like the ladder's scores.
+                  properties:
+                    burnPerHour:
+                      type: string
+                    consumed:
+                      type: string
+                    exhaustionETA:
+                      format: date-time
+                      type: string
+                    learned:
+                      description: |-
+                        Learned is the calibrated limit, kept even when a configured limit
+                        wins, so the two can be compared.
+                      type: string
+                    limit:
+                      type: string
+                    limitSource:
+                      description: 'LimitSource: configured, learned, none.'
+                      type: string
+                    name:
+                      type: string
+                    providerWindow:
+                      description: |-
+                        ProviderWindow is the provider's own view of this window as ccleft
+                        reported it, in the provider's unit (percent, credits, requests, usd) —
+                        unlike Limit/Remaining above, which are in the pool's Unit.
+                      properties:
+                        id:
+                          description: ID is ccleft's window id (five_hour, seven_day,
+                            gemini-weekly, plan...).
+                          type: string
+                        kind:
+                          type: string
+                        limit:
+                          type: string
+                        remaining:
+                          type: string
+                        remainingPercent:
+                          type: string
+                        resetsAt:
+                          format: date-time
+                          type: string
+                        scope:
+                          type: string
+                        unit:
+                          type: string
+                        used:
+                          type: string
+                      required:
+                      - id
+                      type: object
+                    readingPercent:
+                      description: ReadingPercent is the provider's own figure, -1
+                        when absent/stale.
+                      type: string
+                    readingSource:
+                      description: |-
+                        ReadingSource is where ReadingPercent came from: ccleft, configmap or
+                        none.
+                      type: string
+                    remaining:
+                      type: string
+                    resetsAt:
+                      format: date-time
+                      type: string
+                    start:
+                      format: date-time
+                      type: string
+                    usedPercent:
+                      description: |-
+                        UsedPercent: the provider reading when fresh, else consumed/limit,
+                        else -1 (unmeasured — never "exhausted").
+                      type: string
+                  required:
+                  - consumed
+                  - limitSource
+                  - name
+                  - readingPercent
+                  - usedPercent
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -22,6 +22,7 @@ import (
 	"github.com/tuna-os/hive-operator/internal/controller"
 	"github.com/tuna-os/hive-operator/internal/dashboard"
 	"github.com/tuna-os/hive-operator/internal/metrics"
+	"github.com/tuna-os/hive-operator/internal/usage"
 )
 
 var scheme = runtime.NewScheme()
@@ -33,7 +34,7 @@ func init() {
 
 func main() {
 	var metricsAddr, probeAddr, dashAddr string
-	var spokeInterval, authInterval, ladderInterval time.Duration
+	var spokeInterval, authInterval, ladderInterval, poolInterval time.Duration
 	var leaderElect bool
 	var leaderNS string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Prometheus /metrics address.")
@@ -41,6 +42,7 @@ func main() {
 	flag.StringVar(&dashAddr, "dashboard-bind-address", ":8082", "Fleet dashboard address. Empty disables it.")
 	flag.DurationVar(&spokeInterval, "spoke-interval", 2*time.Minute, "How often to re-observe each spoke.")
 	flag.DurationVar(&authInterval, "sharedauth-interval", 30*time.Minute, "How often to verify shared credentials.")
+	flag.DurationVar(&poolInterval, "usagepool-interval", 2*time.Minute, "How often to re-measure each UsagePool.")
 	flag.DurationVar(&ladderInterval, "modelladder-interval", 15*time.Minute, "How often to rebuild model ladders.")
 	// Out-of-cluster there is no serviceaccount namespace to infer, so `make
 	// run` fails at startup unless leader election is disabled or given one.
@@ -82,6 +84,11 @@ func main() {
 	if err := (&controller.SharedAuthReconciler{Client: mgr.GetClient(), Interval: authInterval}).
 		SetupWithManager(mgr, cs, cfg); err != nil {
 		setupLog.Error(err, "unable to set up SharedAuth controller")
+		os.Exit(1)
+	}
+	if err := (&controller.UsagePoolReconciler{Client: mgr.GetClient(), Interval: poolInterval,
+		Fetch: &usage.HTTPFetcher{CS: cs}, Readings: &usage.HTTPReadingsFetcher{}}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to set up UsagePool controller")
 		os.Exit(1)
 	}
 	if err := (&controller.ModelLadderReconciler{Client: mgr.GetClient(), Interval: ladderInterval}).SetupWithManager(mgr); err != nil {

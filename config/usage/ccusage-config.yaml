@@ -1,0 +1,33 @@
+# ccusage prices from a pricing snapshot embedded in the binary (--offline).
+# A model it cannot price counts $0, surfaces as the UsagePool condition
+# Priced=False and as hive_usage_unpriced_model — and silently breaks a
+# costUSD pool: on 2026-09-24 the contributor ran claude-opus-5-5, which
+# ccusage 20.0.24 cannot price, and the new 5h window read $0.00 while
+# Anthropic reported 5%.
+#
+# The values below are ccusage's OWN upstream snapshot for claude-opus-5-5
+# (rust/crates/ccusage-core/src/models-dev-pricing.json at HEAD, not yet
+# released): $4 in / $20 out / $5 cache write / $0.20 cache read per MTok.
+# Delete the override once the sidecar image carries a ccusage that prices it.
+# model_placeholder_m322 (an agy internal id) has no public price; leave it.
+#
+# Create in each spoke namespace. hive-usage-patch.yaml mounts it as an optional
+# volume and the sidecar ignores a missing file, so order does not matter.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hive-usage-ccusage
+data:
+  ccusage.json: |
+    {
+      "defaults": {
+        "pricingOverrides": {
+          "claude-opus-5-5": {
+            "inputCostPerToken": 0.000004,
+            "outputCostPerToken": 0.00002,
+            "cacheCreationInputTokenCost": 0.000005,
+            "cacheReadInputTokenCost": 0.0000002
+          }
+        }
+      }
+    }

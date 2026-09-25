@@ -92,13 +92,65 @@ type HiveSpokeSpec struct {
 	// +optional
 	// +kubebuilder:default=Shadow
 	RotationMode ReconcileMode `json:"rotationMode,omitempty"`
+
+	// RotationUsageSource selects the provider readings rotation plans from:
+	//   Probe      the hive-provider-usage ConfigMap the bash probes publish
+	//              (default — shadow must compare decision logic on the SAME
+	//              inputs the bash job sees, or every diff is ambiguous);
+	//   UsagePool  UsagePool status (ccusage consumption vs limit), falling
+	//              back to Probe for a provider with no pool.
+	// +optional
+	// +kubebuilder:validation:Enum=Probe;UsagePool
+	RotationUsageSource string `json:"rotationUsageSource,omitempty"`
+
+	// AgentTiers maps agent → tier (T1/T2/T3). An agent with no tier is never
+	// placed. Default: hive-rotate.sh's AGENT_TIERS table.
+	// +optional
+	AgentTiers map[string]string `json:"agentTiers,omitempty"`
+
+	// Rotation tunes the placement policy. Every default is hive-rotate.sh's.
+	// +optional
+	Rotation *RotationPolicySpec `json:"rotation,omitempty"`
+}
+
+// RotationPolicySpec mirrors hive-rotate.sh's HIVE_ROTATE_* knobs.
+type RotationPolicySpec struct {
+	// Thresholds: provider → percent at which it counts as exhausted.
+	// Defaults: openai 85, anthropic 90, google 90, deepseek 100, other 85.
+	// +optional
+	Thresholds map[string]int32 `json:"thresholds,omitempty"`
+	// HighVolumeCadenceSeconds: agents kicked at least this often are
+	// high-volume — kept off openai (unless their provider is exhausted) and
+	// capped on google. Default 1800.
+	// +optional
+	HighVolumeCadenceSeconds int32 `json:"highVolumeCadenceSeconds,omitempty"`
+	// AgyMaxHighVolume caps high-volume agents on google per tick. Default 5.
+	// +optional
+	AgyMaxHighVolume int32 `json:"agyMaxHighVolume,omitempty"`
+	// +optional
+	DisableCanaries bool `json:"disableCanaries,omitempty"`
+	// +optional
+	DisableAutoResume bool `json:"disableAutoResume,omitempty"`
+	// +optional
+	DisableMeteredFailover bool `json:"disableMeteredFailover,omitempty"`
+	// PeakProviders are avoided (softly) during PeakWindows. Default deepseek.
+	// +optional
+	PeakProviders []string `json:"peakProviders,omitempty"`
+	// PeakWindows, UTC weekdays, "HH:MM-HH:MM,…". Default 01:00-04:00,06:00-10:00.
+	// +optional
+	PeakWindows string `json:"peakWindows,omitempty"`
 }
 
 // RotationDecision is one auditable placement decision.
 type RotationDecision struct {
-	Agent       string `json:"agent"`
-	FromBackend string `json:"fromBackend,omitempty"`
-	FromModel   string `json:"fromModel,omitempty"`
+	Agent string `json:"agent"`
+	// Action: move, strand, resume or canary.
+	// +optional
+	Action string `json:"action,omitempty"`
+	// +optional
+	FromProvider string `json:"fromProvider,omitempty"`
+	FromBackend  string `json:"fromBackend,omitempty"`
+	FromModel    string `json:"fromModel,omitempty"`
 	// +optional
 	FromEffort string `json:"fromEffort,omitempty"`
 	ToProvider string `json:"toProvider"`
@@ -138,8 +190,12 @@ type AgentState struct {
 	// +optional
 	Effort string `json:"effort,omitempty"`
 	// +optional
-	Mode   string `json:"mode,omitempty"`
-	Paused bool   `json:"paused"`
+	Mode string `json:"mode,omitempty"`
+	// Cadence as /api/status renders it ("5m", "2h"). Rotation keeps
+	// high-volume agents (≤30m) off the subscription pools.
+	// +optional
+	Cadence string `json:"cadence,omitempty"`
+	Paused  bool   `json:"paused"`
 	// PausedTrigger distinguishes why. NOTE it does NOT distinguish an operator
 	// pause from rotation's own: rotation authenticates with the owner session
 	// cookie, so a strand records exactly as a human pause does
@@ -179,6 +235,16 @@ type HiveSpokeStatus struct {
 	// action set the controller would apply if promoted to Enforce.
 	// +optional
 	RotationPlan []RotationDecision `json:"rotationPlan,omitempty"`
+	// RotationPlanText is the plan rendered exactly as `hive-rotate.sh plan`
+	// prints it (agent lines + footer, without the contributors section), so
+	// shadow output can be diffed against the bash job's log with plain diff.
+	// +optional
+	RotationPlanText []string `json:"rotationPlanText,omitempty"`
+	// RotationInputs records what the plan was computed from ("Probe
+	// hive/hive-provider-usage @ 2026-09-24T17:12:32Z"), so a disagreement
+	// can be attributed to inputs rather than logic.
+	// +optional
+	RotationInputs string `json:"rotationInputs,omitempty"`
 	// +optional
 	BudgetUsedTokens int64 `json:"budgetUsedTokens,omitempty"`
 	// +optional
