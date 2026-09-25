@@ -4,8 +4,12 @@ A Kubernetes operator for the tuna-os Hive fleet: the rotation, healing,
 credential-sharing and pacing that currently run as ~12 shell CronJobs, modelled
 as CRDs and controllers, with Prometheus metrics and a fleet dashboard.
 
-**Status: early.** Two controllers exist. `HiveSpoke` is observe-only.
-`SharedAuth` defaults to Shadow. Nothing has been cut over yet.
+**Status: early.** Three controllers exist: `HiveSpoke`, `ModelLadder`, and
+`SharedAuth`. All default to Shadow — `HiveSpoke`'s rotation planner runs
+alongside the legacy CronJobs rather than replacing them. Nothing has been
+cut over yet. Rotation is mid-promotion; see
+[`docs/rotation-promotion.md`](docs/rotation-promotion.md) for the active
+shadow window and the cutover steps.
 
 ## Why
 
@@ -150,10 +154,13 @@ kubectl apply -f config/samples/fleet.yaml
 
 1. ~~`SharedAuth` (shadow)~~ — done; promote to Enforce and suspend
    `hive-shared-auth`.
-2. `ModelLadder` — inventory gate + benchmark union + band derivation.
-3. `Rotation` — provider probes and placement. The big one: ~1400 lines of
-   conditionals in `hive-rotate.sh`, each earned by an incident. Port with the
-   script open beside you, not from memory.
+2. ~~`ModelLadder`~~ — done (PR #15): inventory gate, benchmark union, and
+   band derivation are implemented. It stays read-only by design — rotation
+   consumes `Status.Effective`, `ModelLadder` itself never applies anything.
+3. ~~`Rotation` shadow controller~~ — done (PR #15): provider probes and
+   placement now run in Shadow across all three spokes. Promoting to Enforce
+   and suspending the legacy `hive-rotate*` CronJobs is tracked in
+   [`docs/rotation-promotion.md`](docs/rotation-promotion.md).
 4. `Watchdog` — pane classification and healing.
 5. `Nudge` — the budget-aware kick backstop.
 6. `Pace` — burn-rate pacing.
