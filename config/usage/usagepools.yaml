@@ -2,8 +2,10 @@
 # reads them only when a HiveSpoke sets rotationUsageSource: UsagePool.
 #
 # Limits are left empty (learned): consumption is calibrated against the
-# provider reading in hive/hive-provider-usage while the bash probes still
-# publish it. Configure `limit` only when the provider documents one.
+# provider reading. Readings come from ccleft (hive/ccleft, the provider's own
+# remaining/limit/reset per window) and fall back per window to the bash
+# probe's hive/hive-provider-usage while ccleft is unavailable. Configure
+# `limit` only when the provider documents one.
 apiVersion: hive.tunaos.org/v1alpha1
 kind: UsagePool
 metadata:
@@ -12,9 +14,10 @@ spec:
   provider: anthropic
   unit: costUSD
   windows:
-    - {name: 5h, duration: 5h, readingSlot: slot0}
-    - {name: weekly, duration: 168h, readingSlot: slot1}
+    - {name: 5h, duration: 5h, readingSlot: slot0}        # ccleft: five_hour
+    - {name: weekly, duration: 168h, readingSlot: slot1}  # ccleft: seven_day (model-scoped caps never match)
   reading: {namespace: hive, name: hive-provider-usage}
+  ccleft: {url: http://ccleft.hive.svc:9464}
 ---
 apiVersion: hive.tunaos.org/v1alpha1
 kind: UsagePool
@@ -28,6 +31,7 @@ spec:
     # (weekly while exhausted); calibrate the weekly window from it.
     - {name: weekly, duration: 168h}
   reading: {namespace: hive, name: hive-provider-usage}
+  ccleft: {url: http://ccleft.hive.svc:9464}
 ---
 apiVersion: hive.tunaos.org/v1alpha1
 kind: UsagePool
@@ -37,11 +41,13 @@ spec:
   provider: google
   unit: costUSD
   windows:
-    # agy's "Gemini Models" quota group resets on its own clock; 5h matches
-    # the observed reset spacing — revisit once a week of readings exists.
+    # agy's "Gemini Models" group has a 5-hour and a weekly limit (ccleft:
+    # gemini-5h / gemini-weekly; the "3p" Claude/GPT pool is excluded by
+    # scope). The bash reading collapses both into the worse one.
     - {name: 5h, duration: 5h}
-    - {name: daily, duration: 24h}
+    - {name: weekly, duration: 168h}
   reading: {namespace: hive, name: hive-provider-usage}
+  ccleft: {url: http://ccleft.hive.svc:9464, scope: gemini}
 ---
 apiVersion: hive.tunaos.org/v1alpha1
 kind: UsagePool
@@ -53,5 +59,21 @@ spec:
   # DeepSeek is prepaid balance, not a window: the reading is 0% or 100%.
   # The daily window here is for burn rate and per-agent attribution only.
   windows:
-    - {name: daily, duration: 24h}
+    - {name: daily, duration: 24h, ccleftWindow: "balance:usd"}
   reading: {namespace: hive, name: hive-provider-usage}
+  ccleft: {url: http://ccleft.hive.svc:9464}
+---
+apiVersion: hive.tunaos.org/v1alpha1
+kind: UsagePool
+metadata:
+  name: kiro
+spec:
+  provider: kiro
+  sources: [pi]
+  unit: costUSD
+  # Kiro Power: 10000 credits a month, reset on the 1st 00:00Z. ccleft reports
+  # used/limit/remaining in credits (status.windows[].providerWindow).
+  windows:
+    - {name: monthly, duration: 744h, ccleftWindow: plan}
+  reading: {namespace: hive, name: hive-provider-usage}
+  ccleft: {url: http://ccleft.hive.svc:9464}

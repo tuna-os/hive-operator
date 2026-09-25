@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -12,6 +13,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/tuna-os/ccleft"
 
 	hivev1 "github.com/tuna-os/hive-operator/api/v1alpha1"
 	"github.com/tuna-os/hive-operator/internal/metrics"
@@ -27,7 +30,9 @@ const poolController = "usagepool"
 // spec.rotationUsageSource=UsagePool); a pool itself never acts.
 type UsagePoolReconciler struct {
 	client.Client
-	Fetch    usage.Fetcher
+	Fetch usage.Fetcher
+	// Readings reads ccleft serve (spec.ccleft). Default: HTTP.
+	Readings usage.ReadingsFetcher
 	Interval time.Duration
 	Now      func() time.Time
 }
@@ -150,11 +155,76 @@ func (r *UsagePoolReconciler) readings(ctx context.Context, pool *hivev1.UsagePo
 	return pr, at, ""
 }
 
+// ccleftReading reads the pool's account from ccleft serve. It returns the
+// reading when it is usable (a measured verdict no older than maxAge) and
+// records what it saw in status.account either way; a nil reading plus a
+// note means "fall back to the ConfigMap".
+func (r *UsagePoolReconciler) ccleftReading(ctx context.Context, pool *hivev1.UsagePool, now time.Time) (*ccleft.Reading, string) {
+	ref := pool.Spec.Ccleft
+	if ref == nil {
+		pool.Status.Account = nil
+		return nil, ""
+	}
+	prov := ccleft.Provider(ref.Provider)
+	if prov == "" {
+		prov = usage.CcleftProvider(pool.Spec.Provider)
+	}
+	acct := &hivev1.ProviderAccountStatus{Source: "configmap", Provider: string(prov)}
+	pool.Status.Account = acct
+	f := r.Readings
+	if f == nil {
+		f = &usage.HTTPReadingsFetcher{}
+	}
+	out, err := f.Readings(ctx, ref.URL)
+	if err != nil {
+		acct.Error = "ccleft unavailable: " + err.Error()
+		return nil, acct.Error
+	}
+	rd, err := usage.SelectCcleftReading(out, prov, ref.Account)
+	if err != nil {
+		acct.Error = err.Error()
+		return nil, acct.Error
+	}
+	acct.Account, acct.State, acct.Cause, acct.Plan = rd.Account, string(rd.State), rd.Cause, rd.Plan
+	acct.Stale, acct.FetchedAt, acct.Homes = rd.Stale, metaTime(rd.FetchedAt), rd.Homes
+	if rd.RetryAt != nil {
+		acct.RetryAt = metaTime(*rd.RetryAt)
+	}
+	maxAge := 30 * time.Minute
+	if ref.MaxAge != nil {
+		maxAge = ref.MaxAge.Duration
+	}
+	if err := usage.CcleftUsable(rd, now, maxAge); err != nil {
+		acct.Error = err.Error()
+		return nil, acct.Error
+	}
+	acct.Source = "ccleft"
+	return &rd, ""
+}
+
+func providerWindowStatus(w ccleft.Window) *hivev1.ProviderWindowStatus {
+	num := func(v *float64) string {
+		if v == nil {
+			return ""
+		}
+		return fmtNum(*v)
+	}
+	ps := &hivev1.ProviderWindowStatus{ID: w.ID, Kind: string(w.Kind), Scope: w.Scope, Unit: w.Unit,
+		Used: num(w.Used), Limit: num(w.Limit), Remaining: num(w.Remaining), RemainingPercent: num(w.RemainingPct)}
+	if w.ResetsAt != nil {
+		ps.ResetsAt = metaTime(w.ResetsAt.UTC())
+	}
+	return ps
+}
+
 type windowPlan struct {
 	spec    hivev1.UsageWindowSpec
 	reading usage.Reading
 	start   time.Time
 	resets  time.Time
+	// source of reading: ccleft, configmap or none.
+	source   string
+	provider *hivev1.ProviderWindowStatus
 }
 
 func (r *UsagePoolReconciler) evaluate(ctx context.Context, pool *hivev1.UsagePool, now time.Time) error {
@@ -175,16 +245,38 @@ func (r *UsagePoolReconciler) evaluate(ctx context.Context, pool *hivev1.UsagePo
 		return err
 	}
 	probe, readingAt, readingNote := r.readings(ctx, pool, now)
+	cc, ccNote := r.ccleftReading(ctx, pool, now)
+	scope := ""
+	if pool.Spec.Ccleft != nil {
+		scope = pool.Spec.Ccleft.Scope
+	}
 
 	// Place every window, then ask each sidecar for all starts in one call.
 	plans := make([]windowPlan, 0, len(pool.Spec.Windows))
 	recentStart := now.Add(-time.Hour).Truncate(time.Second)
 	since := []time.Time{recentStart}
+	nFrom := map[string]int{}
 	for _, w := range pool.Spec.Windows {
+		// ccleft first — the provider's own remaining/reset for this exact
+		// window — then the bash ConfigMap, window by window.
 		rd := probe.Reading(w.ReadingSlot, readingAt)
+		src := "configmap"
+		var pw *hivev1.ProviderWindowStatus
+		if cc != nil {
+			if cw, ok := usage.PickCcleftWindow(*cc, w.CcleftWindow, scope, w.Duration.Duration); ok {
+				pw = providerWindowStatus(cw)
+				if crd := usage.CcleftReading(cw, cc.FetchedAt); crd.Known() {
+					rd, src = crd, "ccleft"
+				}
+			}
+		}
+		if !rd.Known() {
+			src = "none"
+		}
+		nFrom[src]++
 		start, resets := usage.WindowStart(now, w.Duration.Duration, rd)
 		start = start.Truncate(time.Second)
-		plans = append(plans, windowPlan{spec: w, reading: rd, start: start, resets: resets})
+		plans = append(plans, windowPlan{spec: w, reading: rd, start: start, resets: resets, source: src, provider: pw})
 		since = append(since, start)
 	}
 
@@ -289,6 +381,7 @@ func (r *UsagePoolReconciler) evaluate(ctx context.Context, pool *hivev1.UsagePo
 		if !p.reading.Known() {
 			ws.ReadingPercent = "-1"
 		}
+		ws.ReadingSource, ws.ProviderWindow = p.source, p.provider
 		if res.Limit > 0 {
 			ws.Limit, ws.Remaining = fmtNum(res.Limit), fmtNum(res.Remaining)
 		}
@@ -300,7 +393,10 @@ func (r *UsagePoolReconciler) evaluate(ctx context.Context, pool *hivev1.UsagePo
 		labels := []string{pool.Name, pool.Spec.Provider, p.spec.Name}
 		metrics.UsageRatio.WithLabelValues(labels...).Set(res.Ratio)
 		src := "ccusage"
-		if p.reading.Known() {
+		switch {
+		case p.source == "ccleft":
+			src = "ccleft"
+		case p.reading.Known():
 			src = "reading"
 		}
 		metrics.UsedPercentPool.DeletePartialMatch(map[string]string{"pool": pool.Name, "window": p.spec.Name})
@@ -351,8 +447,23 @@ func (r *UsagePoolReconciler) evaluate(ctx context.Context, pool *hivev1.UsagePo
 	apiMeta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{Type: "Ready", Status: status, Reason: reason,
 		Message: msg, ObservedGeneration: pool.Generation})
 	rs, rr, rm := metav1.ConditionTrue, "Fresh", "provider reading is fresh"
-	if readingNote != "" {
-		rs, rr, rm = metav1.ConditionFalse, "Unavailable", readingNote
+	notes := strings.Join(nonEmpty(ccNote, readingNote), "; ")
+	switch {
+	case nFrom["none"] == len(plans) && len(plans) > 0:
+		rs, rr, rm = metav1.ConditionFalse, "Unavailable", notes
+		if notes == "" {
+			rm = "no window has a provider reading"
+		}
+	case nFrom["ccleft"] == len(plans) && len(plans) > 0:
+		rr, rm = "Ccleft", "every window read from ccleft"
+	case pool.Spec.Ccleft != nil:
+		rr = "Fallback"
+		rm = fmt.Sprintf("%d window(s) from ccleft, %d from the ConfigMap, %d unread", nFrom["ccleft"], nFrom["configmap"], nFrom["none"])
+		if notes != "" {
+			rm += ": " + notes
+		}
+	case nFrom["none"] > 0 || readingNote != "":
+		rs, rr, rm = metav1.ConditionFalse, "Unavailable", notes
 	}
 	apiMeta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{Type: "Reading", Status: rs, Reason: rr,
 		Message: rm, ObservedGeneration: pool.Generation})
@@ -376,4 +487,14 @@ func (r *UsagePoolReconciler) evaluate(ctx context.Context, pool *hivev1.UsagePo
 // SetupWithManager wires the controller.
 func (r *UsagePoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).For(&hivev1.UsagePool{}).Complete(r)
+}
+
+func nonEmpty(ss ...string) []string {
+	var out []string
+	for _, s := range ss {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }

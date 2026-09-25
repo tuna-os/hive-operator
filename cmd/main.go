@@ -87,7 +87,7 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.UsagePoolReconciler{Client: mgr.GetClient(), Interval: poolInterval,
-		Fetch: &usage.HTTPFetcher{CS: cs}}).SetupWithManager(mgr); err != nil {
+		Fetch: &usage.HTTPFetcher{CS: cs}, Readings: &usage.HTTPReadingsFetcher{}}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to set up UsagePool controller")
 		os.Exit(1)
 	}

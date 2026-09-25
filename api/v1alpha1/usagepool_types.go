@@ -22,6 +22,41 @@ type UsageWindowSpec struct {
 	// (leave empty).
 	// +optional
 	ReadingSlot string `json:"readingSlot,omitempty"`
+	// CcleftWindow selects the ccleft window (Reading.windows[].id, e.g.
+	// "five_hour", "seven_day", "weekly", "gemini-5h", "plan") that feeds this
+	// window when spec.ccleft is set. Empty: the binding window whose kind
+	// matches Duration (≤6h five_hour, ≤48h daily, ≤14d weekly, else
+	// monthly), restricted to spec.ccleft.scope.
+	// +optional
+	CcleftWindow string `json:"ccleftWindow,omitempty"`
+}
+
+// CcleftRef points at a `ccleft serve` instance (github.com/tuna-os/ccleft),
+// which reports each provider account's REMAINING quota straight from the
+// provider (remaining, limit, reset) and dedupes homes sharing one account.
+type CcleftRef struct {
+	// URL of ccleft serve, e.g. http://ccleft.hive.svc:9464. GET /readings is
+	// read from it.
+	URL string `json:"url"`
+	// Provider is ccleft's provider name. Default derived from the pool's:
+	// anthropic→claude, openai→codex, google→agy, github→copilot,
+	// meta→muse, kiro→kiro, deepseek→deepseek.
+	// +optional
+	Provider string `json:"provider,omitempty"`
+	// Account pins one account fingerprint when ccleft serves several for
+	// this provider. Empty: exactly one account is required.
+	// +optional
+	Account string `json:"account,omitempty"`
+	// Scope restricts automatic window matching to one ccleft scope, e.g.
+	// "gemini" for agy's Gemini pool (agy also reports a "3p" pool for
+	// Claude/GPT models on the same account).
+	// +optional
+	Scope string `json:"scope,omitempty"`
+	// MaxAge beyond which a reading's measurement (fetched_at — for a stale
+	// last-good reading, the time of the last good measurement) is ignored.
+	// Default 30m.
+	// +optional
+	MaxAge *metav1.Duration `json:"maxAge,omitempty"`
 }
 
 // ProbeConfigMapRef points at a provider-reading ConfigMap in the
@@ -69,6 +104,12 @@ type UsagePoolSpec struct {
 	// it is the bash probe's ConfigMap; see DESIGN.md for retiring it.
 	// +optional
 	Reading *ProbeConfigMapRef `json:"reading,omitempty"`
+	// Ccleft reads the provider's own remaining/limit/reset per window from
+	// ccleft. When set it is preferred; Reading (the ConfigMap) is the
+	// per-window fallback while ccleft is unreachable, has no usable reading
+	// for this account, or has no matching window.
+	// +optional
+	Ccleft *CcleftRef `json:"ccleft,omitempty"`
 	// SidecarPort is where hive-usage listens in each hive pod. Default 9464.
 	// +optional
 	SidecarPort int32 `json:"sidecarPort,omitempty"`
@@ -106,6 +147,67 @@ type UsageWindowStatus struct {
 	BurnPerHour string `json:"burnPerHour,omitempty"`
 	// +optional
 	ExhaustionETA *metav1.Time `json:"exhaustionETA,omitempty"`
+	// ReadingSource is where ReadingPercent came from: ccleft, configmap or
+	// none.
+	// +optional
+	ReadingSource string `json:"readingSource,omitempty"`
+	// ProviderWindow is the provider's own view of this window as ccleft
+	// reported it, in the provider's unit (percent, credits, requests, usd) —
+	// unlike Limit/Remaining above, which are in the pool's Unit.
+	// +optional
+	ProviderWindow *ProviderWindowStatus `json:"providerWindow,omitempty"`
+}
+
+// ProviderWindowStatus is one ccleft window. Numbers are decimal strings.
+type ProviderWindowStatus struct {
+	// ID is ccleft's window id (five_hour, seven_day, gemini-weekly, plan...).
+	ID   string `json:"id"`
+	Kind string `json:"kind,omitempty"`
+	// +optional
+	Scope string `json:"scope,omitempty"`
+	Unit  string `json:"unit,omitempty"`
+	// +optional
+	Used string `json:"used,omitempty"`
+	// +optional
+	Limit string `json:"limit,omitempty"`
+	// +optional
+	Remaining string `json:"remaining,omitempty"`
+	// +optional
+	RemainingPercent string `json:"remainingPercent,omitempty"`
+	// +optional
+	ResetsAt *metav1.Time `json:"resetsAt,omitempty"`
+}
+
+// ProviderAccountStatus is the pool's account as ccleft last reported it.
+type ProviderAccountStatus struct {
+	// Source of the reading: ccleft, or configmap when ccleft was unusable.
+	Source string `json:"source"`
+	// +optional
+	Provider string `json:"provider,omitempty"`
+	// Account is ccleft's non-secret account fingerprint.
+	// +optional
+	Account string `json:"account,omitempty"`
+	// State: ok, limited, exhausted, rate_limited, auth_required,
+	// unsupported, error.
+	// +optional
+	State string `json:"state,omitempty"`
+	// +optional
+	Cause string `json:"cause,omitempty"`
+	// +optional
+	Plan string `json:"plan,omitempty"`
+	// Stale: ccleft served its last good measurement during an upstream
+	// failure (429 etc.); FetchedAt is that measurement's time.
+	Stale bool `json:"stale"`
+	// +optional
+	FetchedAt *metav1.Time `json:"fetchedAt,omitempty"`
+	// +optional
+	RetryAt *metav1.Time `json:"retryAt,omitempty"`
+	// Homes that ccleft resolved to this account.
+	// +optional
+	Homes []string `json:"homes,omitempty"`
+	// Error explains why ccleft could not be used (the fallback reason).
+	// +optional
+	Error string `json:"error,omitempty"`
 }
 
 // AgentUsage is one agent's consumption in a pool window.
@@ -151,6 +253,9 @@ type UsagePoolStatus struct {
 	Sources []UsageSourceStatus `json:"sources,omitempty"`
 	// +optional
 	ObservedAt *metav1.Time `json:"observedAt,omitempty"`
+	// Account is the provider account behind the pool, from ccleft.
+	// +optional
+	Account *ProviderAccountStatus `json:"account,omitempty"`
 }
 
 // +kubebuilder:object:root=true

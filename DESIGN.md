@@ -176,14 +176,22 @@ spec:
   windows:
     - {name: 5h, duration: 5h, readingSlot: slot0}
     - {name: weekly, duration: 168h, readingSlot: slot1, limit: ""}   # "" = learn
-  reading: {namespace: hive, name: hive-provider-usage, maxAge: 30m}  # transitional
+  reading: {namespace: hive, name: hive-provider-usage, maxAge: 30m}  # transitional / fallback
+  ccleft: {url: http://ccleft.hive.svc:9464, scope: "", maxAge: 30m}  # preferred reading source
 status:
   windows[]:  start, resetsAt, consumed, limit, limitSource (configured|learned|none),
               learned, usedPercent, readingPercent, remaining, burnPerHour, exhaustionETA
   agents[]:   agent, window, consumed, share, models
   sources[]:  namespace, source, fingerprint, ok, counted, primed, error, unpricedModels
-  conditions: Ready, Reading (fresh/stale), Priced (unpriced models)
+              readingSource (ccleft|configmap|none), providerWindow{id,unit,used,limit,remaining,remainingPercent,resetsAt}
+  account:    source, provider, account, state, cause, plan, stale, fetchedAt, retryAt, homes, error   # from ccleft
+  conditions: Ready, Reading (Ccleft | Fresh | Fallback | Unavailable), Priced (unpriced models)
 ```
+
+- **Reading source: [ccleft](https://github.com/tuna-os/ccleft) first, the ConfigMap as fallback.** With `spec.ccleft` set, each window takes the provider's own remaining/limit/reset from ccleft's `GET /readings`. The window is `windows[].ccleftWindow` by id, or else the binding window whose kind matches the duration (≤6h `five_hour`, ≤48h `daily`, ≤14d `weekly`, else `monthly`) within `spec.ccleft.scope` (for agy, `gemini` rather than its `3p` pool). The operator imports ccleft's `Reading`/`Window` types as a Go module, so the schema cannot drift.
+  - A reading counts when it carries a verdict (`ok`/`limited`/`exhausted`) measured within `maxAge`. A stale last-good that ccleft serves during 429s counts too, as long as it is young enough.
+  - Otherwise the window falls back to the ConfigMap, and `status.account.error` says why: ccleft down, a 429 with no last-good yet, `auth_required`, or too old.
+  - ccleft answers from its cache, so reading it never causes an upstream quota call. ccleft dedupes homes that share an account, which is why one ccleft per account pool replaces the per-spoke bash probes.
 
 - **The limit** is `configured` if set. Otherwise it is **learned**: when a fresh reading ≥5% exists, `learned = EWMA(consumed / (pct/100))`. An observed exhaustion is the same equation at 100%.
 - **`usedPercent`**, in order of preference:

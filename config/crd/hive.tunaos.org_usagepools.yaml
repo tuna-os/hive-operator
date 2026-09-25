@@ -66,6 +66,44 @@ spec:
               together. The sidecar in each spoke reads the same shared store; the
               controller counts each store once, by content fingerprint.
             properties:
+              ccleft:
+                description: |-
+                  Ccleft reads the provider's own remaining/limit/reset per window from
+                  ccleft. When set it is preferred; Reading (the ConfigMap) is the
+                  per-window fallback while ccleft is unreachable, has no usable reading
+                  for this account, or has no matching window.
+                properties:
+                  account:
+                    description: |-
+                      Account pins one account fingerprint when ccleft serves several for
+                      this provider. Empty: exactly one account is required.
+                    type: string
+                  maxAge:
+                    description: |-
+                      MaxAge beyond which a reading's measurement (fetched_at — for a stale
+                      last-good reading, the time of the last good measurement) is ignored.
+                      Default 30m.
+                    type: string
+                  provider:
+                    description: |-
+                      Provider is ccleft's provider name. Default derived from the pool's:
+                      anthropic→claude, openai→codex, google→agy, github→copilot,
+                      meta→muse, kiro→kiro, deepseek→deepseek.
+                    type: string
+                  scope:
+                    description: |-
+                      Scope restricts automatic window matching to one ccleft scope, e.g.
+                      "gemini" for agy's Gemini pool (agy also reports a "3p" pool for
+                      Claude/GPT models on the same account).
+                    type: string
+                  url:
+                    description: |-
+                      URL of ccleft serve, e.g. http://ccleft.hive.svc:9464. GET /readings is
+                      read from it.
+                    type: string
+                required:
+                - url
+                type: object
               mode:
                 default: Observe
                 description: |-
@@ -134,6 +172,14 @@ spec:
                 items:
                   description: UsageWindowSpec is one quota window of a provider account.
                   properties:
+                    ccleftWindow:
+                      description: |-
+                        CcleftWindow selects the ccleft window (Reading.windows[].id, e.g.
+                        "five_hour", "seven_day", "weekly", "gemini-5h", "plan") that feeds this
+                        window when spec.ccleft is set. Empty: the binding window whose kind
+                        matches Duration (≤6h five_hour, ≤48h daily, ≤14d weekly, else
+                        monthly), restricted to spec.ccleft.scope.
+                      type: string
                     duration:
                       description: |-
                         Duration of the window. When the provider reading carries a reset time
@@ -170,6 +216,52 @@ spec:
           status:
             description: UsagePoolStatus is the measured state of the pool.
             properties:
+              account:
+                description: Account is the provider account behind the pool, from
+                  ccleft.
+                properties:
+                  account:
+                    description: Account is ccleft's non-secret account fingerprint.
+                    type: string
+                  cause:
+                    type: string
+                  error:
+                    description: Error explains why ccleft could not be used (the
+                      fallback reason).
+                    type: string
+                  fetchedAt:
+                    format: date-time
+                    type: string
+                  homes:
+                    description: Homes that ccleft resolved to this account.
+                    items:
+                      type: string
+                    type: array
+                  plan:
+                    type: string
+                  provider:
+                    type: string
+                  retryAt:
+                    format: date-time
+                    type: string
+                  source:
+                    description: 'Source of the reading: ccleft, or configmap when
+                      ccleft was unusable.'
+                    type: string
+                  stale:
+                    description: |-
+                      Stale: ccleft served its last good measurement during an upstream
+                      failure (429 etc.); FetchedAt is that measurement's time.
+                    type: boolean
+                  state:
+                    description: |-
+                      State: ok, limited, exhausted, rate_limited, auth_required,
+                      unsupported, error.
+                    type: string
+                required:
+                - source
+                - stale
+                type: object
               agents:
                 items:
                   description: AgentUsage is one agent's consumption in a pool window.
@@ -318,9 +410,44 @@ spec:
                       type: string
                     name:
                       type: string
+                    providerWindow:
+                      description: |-
+                        ProviderWindow is the provider's own view of this window as ccleft
+                        reported it, in the provider's unit (percent, credits, requests, usd) —
+                        unlike Limit/Remaining above, which are in the pool's Unit.
+                      properties:
+                        id:
+                          description: ID is ccleft's window id (five_hour, seven_day,
+                            gemini-weekly, plan...).
+                          type: string
+                        kind:
+                          type: string
+                        limit:
+                          type: string
+                        remaining:
+                          type: string
+                        remainingPercent:
+                          type: string
+                        resetsAt:
+                          format: date-time
+                          type: string
+                        scope:
+                          type: string
+                        unit:
+                          type: string
+                        used:
+                          type: string
+                      required:
+                      - id
+                      type: object
                     readingPercent:
                       description: ReadingPercent is the provider's own figure, -1
                         when absent/stale.
+                      type: string
+                    readingSource:
+                      description: |-
+                        ReadingSource is where ReadingPercent came from: ccleft, configmap or
+                        none.
                       type: string
                     remaining:
                       type: string

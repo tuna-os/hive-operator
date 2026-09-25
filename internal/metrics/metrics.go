@@ -118,7 +118,7 @@ var (
 	// reading when fresh, else 100×ratio, else -1.
 	UsedPercentPool = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "hive_pool_used_percent",
-		Help: "Pool window used percent as rotation consumes it; source=reading|ccusage. -1 unmeasured.",
+		Help: "Pool window used percent as rotation consumes it; source=ccleft|reading|ccusage. -1 unmeasured.",
 	}, []string{"pool", "provider", "window", "source"})
 
 	// ReadingPercent is the provider-reported figure alone, for comparing
