@@ -40,19 +40,23 @@ type HiveSpokeReconciler struct {
 	Interval time.Duration
 }
 
+// rawAgent is one agent entry as /api/status reports it, before folding in
+// the runtime override journal, pins, or idle ages.
+type rawAgent struct {
+	Name          string `json:"name"`
+	CLI           string `json:"cli"`
+	Model         string `json:"model"`
+	Effort        string `json:"reasoningEffort"`
+	Mode          string `json:"mode"`
+	Paused        bool   `json:"paused"`
+	PausedTrigger string `json:"pausedTrigger"`
+	PausedReason  string `json:"pausedReason"`
+	OnDemand      *bool  `json:"onDemand"`
+}
+
 // statusResponse is the subset of /api/status this operator reads.
 type statusResponse struct {
-	Agents []struct {
-		Name          string `json:"name"`
-		CLI           string `json:"cli"`
-		Model         string `json:"model"`
-		Effort        string `json:"reasoningEffort"`
-		Mode          string `json:"mode"`
-		Paused        bool   `json:"paused"`
-		PausedTrigger string `json:"pausedTrigger"`
-		PausedReason  string `json:"pausedReason"`
-		OnDemand      *bool  `json:"onDemand"`
-	} `json:"agents"`
+	Agents []rawAgent     `json:"agents"`
 	Budget map[string]any `json:"budget"`
 }
 
@@ -122,13 +126,7 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// /api/status can lag switch/model writes. The persisted override journal is
 	// the authority used at the next launch, so shadow decisions must overlay it
 	// or they will certify invalid pairs such as codex + muse-spark as healthy.
-	type runtimeAgent struct {
-		Backend string `json:"backend_override"`
-		Model   string `json:"model_override"`
-	}
-	var runtimeState struct {
-		Agents map[string]runtimeAgent `json:"agents"`
-	}
+	var runtimeState runtimeStateFile
 	if out, err := r.Hive.Sh(ctx, sp.Spec.Namespace, pod, "cat /data/hive-state.json 2>/dev/null"); err == nil {
 		_ = json.Unmarshal([]byte(out), &runtimeState)
 	}
@@ -138,42 +136,18 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		pinned[p.Agent] = true
 	}
 
-	var running, paused, onDemand int
-	sp.Status.Agents = nil
+	obs := observeAgents(sr.Agents, runtimeState, ages, pinned)
+	sp.Status.Agents = obs.Agents
 	metrics.AgentIdleSeconds.Reset()
-	for _, a := range sr.Agents {
-		if persisted, ok := runtimeState.Agents[a.Name]; ok {
-			if persisted.Backend != "" {
-				a.CLI = persisted.Backend
-			}
-			if persisted.Model != "" {
-				a.Model = persisted.Model
-			}
-		}
-		od := a.OnDemand != nil && *a.OnDemand
-		st := hivev1.AgentState{
-			Name: a.Name, Backend: a.CLI, Model: a.Model, Effort: a.Effort, Mode: a.Mode,
-			Paused: a.Paused, PausedTrigger: a.PausedTrigger, PausedReason: a.PausedReason,
-			OnDemand: od, IdleSeconds: ages[a.Name], Pinned: pinned[a.Name],
-		}
-		sp.Status.Agents = append(sp.Status.Agents, st)
-
-		switch {
-		case od:
-			onDemand++
-		case a.Paused:
-			paused++
-		default:
-			running++
-		}
+	for _, a := range obs.Agents {
 		metrics.AgentPaused.WithLabelValues(sp.Name, a.Name, a.PausedTrigger).Set(b2f(a.Paused))
 		if v, ok := ages[a.Name]; ok && v >= 0 {
-			metrics.AgentIdleSeconds.WithLabelValues(sp.Name, a.Name, a.CLI, a.Model).Set(float64(v))
+			metrics.AgentIdleSeconds.WithLabelValues(sp.Name, a.Name, a.Backend, a.Model).Set(float64(v))
 		}
 	}
-	metrics.AgentsTotal.WithLabelValues(sp.Name, "running").Set(float64(running))
-	metrics.AgentsTotal.WithLabelValues(sp.Name, "paused").Set(float64(paused))
-	metrics.AgentsTotal.WithLabelValues(sp.Name, "on_demand").Set(float64(onDemand))
+	metrics.AgentsTotal.WithLabelValues(sp.Name, "running").Set(float64(obs.Running))
+	metrics.AgentsTotal.WithLabelValues(sp.Name, "paused").Set(float64(obs.Paused))
+	metrics.AgentsTotal.WithLabelValues(sp.Name, "on_demand").Set(float64(obs.OnDemand))
 
 	// Build the same placement decision set in Shadow and Enforce. Keeping one
 	// planner is what makes a week of shadow output meaningful: promotion only
@@ -226,6 +200,67 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: iv}, nil
+}
+
+// runtimeAgentOverride is one agent's entry in the persisted override journal
+// (hive-state.json). backend_override/model_override are the authority used
+// at the next launch, ahead of whatever /api/status currently reports.
+type runtimeAgentOverride struct {
+	Backend string `json:"backend_override"`
+	Model   string `json:"model_override"`
+}
+
+// runtimeStateFile is the subset of hive-state.json this controller reads.
+type runtimeStateFile struct {
+	Agents map[string]runtimeAgentOverride `json:"agents"`
+}
+
+// observation is the result of folding /api/status against the runtime
+// override journal, pins, and idle ages — everything Reconcile needs to
+// populate HiveSpokeStatus.Agents and the per-agent count gauges, without
+// touching the Kubernetes API or emitting metrics itself.
+type observation struct {
+	Agents                    []hivev1.AgentState
+	Running, Paused, OnDemand int
+}
+
+// observeAgents folds the raw /api/status agents against the persisted
+// override journal (authoritative over /api/status, which can lag a
+// switch/model write), spec-declared pins, and previously computed idle
+// ages, into the AgentState list Reconcile publishes to status.
+//
+// Pure and side-effect free so it is testable independently of a live
+// cluster or pod exec — the seam the observe phase lacked before this
+// extraction.
+func observeAgents(agents []rawAgent, runtimeState runtimeStateFile, ages map[string]int64, pinned map[string]bool) observation {
+	var obs observation
+	for _, a := range agents {
+		if persisted, ok := runtimeState.Agents[a.Name]; ok {
+			if persisted.Backend != "" {
+				a.CLI = persisted.Backend
+			}
+			if persisted.Model != "" {
+				a.Model = persisted.Model
+			}
+		}
+		od := a.OnDemand != nil && *a.OnDemand
+		st := hivev1.AgentState{
+			Name: a.Name, Backend: a.CLI, Model: a.Model, Effort: a.Effort, Mode: a.Mode,
+			Paused: a.Paused, PausedTrigger: a.PausedTrigger, PausedReason: a.PausedReason,
+			OnDemand: od, IdleSeconds: ages[a.Name], Pinned: pinned[a.Name],
+		}
+		obs.Agents = append(obs.Agents, st)
+
+		switch {
+		case od:
+			obs.OnDemand++
+		case a.Paused:
+			obs.Paused++
+		default:
+			obs.Running++
+		}
+	}
+	return obs
 }
 
 func (r *HiveSpokeReconciler) providerUsage(ctx context.Context, sp *hivev1.HiveSpoke) []hivev1.ProviderState {
@@ -370,15 +405,7 @@ func numFrom(m map[string]any, k string) (float64, bool) {
 }
 
 func (r *HiveSpokeReconciler) dashboardToken(ctx context.Context, ns string) (string, error) {
-	var sec struct {
-		Data map[string][]byte
-	}
-	_ = sec
-	s, err := r.Hive.Secret(ctx, ns, "hive-secrets", "HIVE_DASHBOARD_TOKEN")
-	if err != nil {
-		return "", err
-	}
-	return s, nil
+	return r.Hive.Secret(ctx, ns, "hive-secrets", "HIVE_DASHBOARD_TOKEN")
 }
 
 // SetupWithManager wires the controller.
