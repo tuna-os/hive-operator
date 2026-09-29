@@ -79,7 +79,7 @@ func (r *SharedAuthReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		marker := fmt.Sprintf("%s/%s/.shared-auth-probe", home, dir)
 
 		if _, err := r.Hive.Sh(ctx, sa.Spec.PrimaryNamespace, primaryPod,
-			fmt.Sprintf("printf '%%s' %q > %q", stamp, marker)); err != nil {
+			fmt.Sprintf("printf '%%s' %s > %s", hiveclient.ShellQuote(stamp), hiveclient.ShellQuote(marker))); err != nil {
 			lg.Error(err, "primary not writable", "dir", dir)
 			status.Consistent = false
 			continue
@@ -95,7 +95,7 @@ func (r *SharedAuthReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				byNS[ns].Message = err.Error()
 				continue
 			}
-			got, _ := r.Hive.Sh(ctx, ns, pod, fmt.Sprintf("cat %q 2>/dev/null", marker))
+			got, _ := r.Hive.Sh(ctx, ns, pod, fmt.Sprintf("cat %s 2>/dev/null", hiveclient.ShellQuote(marker)))
 			ok := strings.TrimSpace(got) == stamp
 			byNS[ns].Shared[dir] = ok
 			metrics.SharedAuthConsistent.WithLabelValues(sa.Name, ns, dir).Set(b2f(ok))
@@ -108,7 +108,7 @@ func (r *SharedAuthReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			}
 		}
 		metrics.SharedAuthConsistent.WithLabelValues(sa.Name, sa.Spec.PrimaryNamespace, dir).Set(1)
-		_, _ = r.Hive.Sh(ctx, sa.Spec.PrimaryNamespace, primaryPod, fmt.Sprintf("rm -f %q", marker))
+		_, _ = r.Hive.Sh(ctx, sa.Spec.PrimaryNamespace, primaryPod, fmt.Sprintf("rm -f %s", hiveclient.ShellQuote(marker)))
 	}
 
 	// Credential health and the two repairable causes.
@@ -120,8 +120,8 @@ func (r *SharedAuthReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		st := byNS[ns]
 
 		tok, _ := r.Hive.Sh(ctx, ns, pod, fmt.Sprintf(
-			`jq -r 'if ((.claudeAiOauth.accessToken // "") == "") then "EMPTY" else "ok" end' %q 2>/dev/null`,
-			home+"/.claude/.credentials.json"))
+			`jq -r 'if ((.claudeAiOauth.accessToken // "") == "") then "EMPTY" else "ok" end' %s 2>/dev/null`,
+			hiveclient.ShellQuote(home+"/.claude/.credentials.json")))
 		st.CredentialPresent = strings.TrimSpace(tok) == "ok"
 		metrics.CredentialPresent.WithLabelValues(sa.Name, ns).Set(b2f(st.CredentialPresent))
 		if !st.CredentialPresent {
@@ -134,15 +134,15 @@ func (r *SharedAuthReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		// hasCompletedOnboarding reads true. A MISSING file is not "fine"
 		// either: the CLI authors one with no theme and wedges the same way.
 		theme, _ := r.Hive.Sh(ctx, ns, pod, fmt.Sprintf(
-			`jq -r '.theme // "null"' %q 2>/dev/null`, home+"/.claude.json"))
+			`jq -r '.theme // "null"' %s 2>/dev/null`, hiveclient.ShellQuote(home+"/.claude.json")))
 		st.ThemeSet = strings.TrimSpace(theme) != "null" && strings.TrimSpace(theme) != ""
 		if !st.ThemeSet && sa.Spec.RepairTheme {
 			action := fmt.Sprintf("%s: set .claude.json theme (unset — CLI stops at the theme picker)", ns)
 			if mode == hivev1.ModeEnforce {
-				script := fmt.Sprintf(`f=%q
+				script := fmt.Sprintf(`f=%s
 if [ ! -f "$f" ]; then printf '%%s' '{"theme":"dark","hasCompletedOnboarding":true}' > "$f" || exit 3
 else t=$(mktemp) && jq '.theme = "dark" | .hasCompletedOnboarding = true' "$f" > "$t" && cat "$t" > "$f" && rm -f "$t"; fi
-chgrp node "$f" 2>/dev/null; chmod 664 "$f" 2>/dev/null`, home+"/.claude.json")
+chgrp node "$f" 2>/dev/null; chmod 664 "$f" 2>/dev/null`, hiveclient.ShellQuote(home+"/.claude.json"))
 				if _, err := r.Hive.Sh(ctx, ns, pod, script); err != nil {
 					status.PendingRepairs = append(status.PendingRepairs, action+" — REPAIR FAILED: "+err.Error())
 					metrics.Action(sharedAuthController, sa.Name, "repair_theme", false)
@@ -160,8 +160,12 @@ chgrp node "$f" 2>/dev/null; chmod 664 "$f" 2>/dev/null`, home+"/.claude.json")
 		// refresh fails and looks exactly like an expired subscription.
 		if sa.Spec.RepairPermissions {
 			if mode == hivev1.ModeEnforce {
-				script := fmt.Sprintf(`for d in %s; do p=%s/$d; [ -e "$p" ] || continue; chgrp -R node "$p" 2>/dev/null; chmod -R g+rwX "$p" 2>/dev/null; done`,
-					strings.Join(dirs, " "), home)
+				quotedDirs := make([]string, len(dirs))
+				for i, d := range dirs {
+					quotedDirs[i] = hiveclient.ShellQuote(d)
+				}
+				script := fmt.Sprintf(`for d in %s; do p=%s/"$d"; [ -e "$p" ] || continue; chgrp -R node "$p" 2>/dev/null; chmod -R g+rwX "$p" 2>/dev/null; done`,
+					strings.Join(quotedDirs, " "), hiveclient.ShellQuote(home))
 				_, _ = r.Hive.Sh(ctx, ns, pod, script)
 				metrics.Action(sharedAuthController, sa.Name, "repair_perms", true)
 			} else {
