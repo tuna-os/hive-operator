@@ -1,7 +1,7 @@
 # hive-usage: the per-hive-pod usage sidecar (cmd/hive-usage) plus a pinned
 # ccusage binary. ccusage ships a static-pie Rust build per platform on npm as
 # @ccusage/ccusage-<os>-<arch>; no Node runtime is needed.
-FROM golang:1.26 AS build
+FROM golang:1.27 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
