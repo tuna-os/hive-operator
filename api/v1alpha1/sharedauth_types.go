@@ -46,15 +46,16 @@ type SharedAuthSpec struct {
 	AgentHome string `json:"agentHome,omitempty"`
 
 	// Dirs under AgentHome that must resolve to the same storage everywhere.
+	// The default is hive-shared-auth.sh's HIVE_SHARED_AUTH_DIRS.
 	//
 	// ".config/muse" carries Muse Code's credential (auth.json, written by
-	// `muse login` / `muse auth set`), so one login covers the fleet the same
-	// way ".claude" does. Sharing it is OPTIONAL for muse in a way it is not
-	// for claude: muse also reads META_API_KEY from the environment and
-	// documents that as always taking priority over the stored credential, so
-	// a spoke supplying the key via its Secret needs no shared dir at all.
+	// `muse login` / `muse auth set`) but is NOT in the default: it is not a
+	// shared mount on reef/hanthor (write-through says so), and muse reads
+	// META_API_KEY from the environment with priority over the stored
+	// credential, so a spoke supplying the key via its Secret needs no shared
+	// dir. Listing it makes every pass report NOT SHARED for those spokes.
 	// +optional
-	// +kubebuilder:default={".claude",".gemini",".codex",".config/muse"}
+	// +kubebuilder:default={".claude",".gemini",".codex"}
 	Dirs []string `json:"dirs,omitempty"`
 
 	// Mode gates repairs.
@@ -76,6 +77,30 @@ type SharedAuthSpec struct {
 	// +optional
 	// +kubebuilder:default=true
 	RepairTheme bool `json:"repairTheme,omitempty"`
+
+	// RepairAgyStatusLine removes the exact broken
+	// {"statusLine":{"command":"/status"}} from the shared
+	// .gemini/antigravity-cli/settings.json (every agy launch otherwise prints
+	// "Statusline error: sh: 1: /status: not found"). Nothing else is touched.
+	// +optional
+	// +kubebuilder:default=true
+	RepairAgyStatusLine bool `json:"repairAgyStatusLine,omitempty"`
+
+	// Incumbent is the bash CronJob doing the same repairs. Enforce is
+	// INTERLOCKED on it: while it exists and is not suspended, the controller
+	// repairs nothing (it verifies exactly as in Shadow) and says so in the
+	// IncumbentActive condition. Two writers of the same files is worse than
+	// one. An empty name disables the interlock.
+	// +optional
+	// +kubebuilder:default={namespace: hive, name: hive-shared-auth}
+	Incumbent *CronJobRef `json:"incumbent,omitempty"`
+}
+
+// CronJobRef names a CronJob.
+type CronJobRef struct {
+	Namespace string `json:"namespace"`
+	// +optional
+	Name string `json:"name,omitempty"`
 }
 
 // SharedAuthNamespaceStatus is the per-namespace verification result.
@@ -105,6 +130,14 @@ type SharedAuthStatus struct {
 	// output of the controller.
 	// +optional
 	PendingRepairs []string `json:"pendingRepairs,omitempty"`
+	// Report is the pass in hive-shared-auth.sh's own output format, line for
+	// line — diff it against `kubectl -n hive logs job/<hive-shared-auth-…>`.
+	// +optional
+	Report []string `json:"report,omitempty"`
+	// EffectiveMode is the mode the last pass actually ran in: Enforce
+	// degrades to Shadow while the incumbent CronJob is active.
+	// +optional
+	EffectiveMode ReconcileMode `json:"effectiveMode,omitempty"`
 	// +optional
 	ObservedAt *metav1.Time `json:"observedAt,omitempty"`
 }
@@ -113,6 +146,7 @@ type SharedAuthStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=sauth
 // +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`
+// +kubebuilder:printcolumn:name="Effective",type=string,JSONPath=`.status.effectiveMode`
 // +kubebuilder:printcolumn:name="Consistent",type=boolean,JSONPath=`.status.consistent`
 // +kubebuilder:printcolumn:name="Observed",type=date,JSONPath=`.status.observedAt`
 

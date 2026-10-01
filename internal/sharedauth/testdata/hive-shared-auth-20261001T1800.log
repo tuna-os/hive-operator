@@ -1,0 +1,10 @@
+.claude    hive-reef      SHARED ok
+.gemini    hive-reef      SHARED ok
+.codex     hive-reef      SHARED ok
+.claude    hive-hanthor   SHARED ok
+.gemini    hive-hanthor   SHARED ok
+.codex     hive-hanthor   SHARED ok
+creds      hive           CLAUDE TOKEN EMPTY — needs `claude auth login` (one login covers the fleet)
+creds      hive-reef      CLAUDE TOKEN EMPTY — needs `claude auth login` (one login covers the fleet)
+creds      hive-hanthor   CLAUDE TOKEN EMPTY — needs `claude auth login` (one login covers the fleet)
+shared-auth: PROBLEMS ABOVE

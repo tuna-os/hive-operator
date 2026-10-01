@@ -17,10 +17,16 @@ spec:
   primaryNamespace: hive
   namespaces: [hive, hive-reef, hive-hanthor]
   agentHome: /data/home
-  dirs: [".claude", ".gemini", ".codex", ".config/muse"]
+  # = HIVE_SHARED_AUTH_DIRS. .config/muse is not a shared mount on reef/hanthor
+  # (write-through: NOT SHARED) and muse takes META_API_KEY from env first.
+  dirs: [".claude", ".gemini", ".codex"]
+  # Enforce = hive-shared-auth.sh reconcile; interlocked on the incumbent
+  # CronJob (suspend it via HiveHousekeeping/fleet in the same change).
   mode: Shadow
   repairPermissions: true
   repairTheme: true
+  repairAgyStatusLine: true
+  incumbent: {namespace: hive, name: hive-shared-auth}
 ---
 apiVersion: hive.tunaos.org/v1alpha1
 kind: HiveSpoke
