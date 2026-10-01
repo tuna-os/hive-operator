@@ -107,6 +107,20 @@ var (
 		Help: "Actions a controller decided on, by kind and whether they were applied.",
 	}, []string{"controller", "object", "action", "applied"})
 
+	// ReleaseTargetPhase is one-hot per release target. Alert on
+	// phase="RolledBack"|"Failed"|"Drifted" == 1.
+	ReleaseTargetPhase = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hive_release_target_phase",
+		Help: "1 for the current rollout phase of each HiveRelease target.",
+	}, []string{"release", "target", "phase"})
+
+	// ReleaseRollbacks counts gate failures (reason=gate) and upgrades that
+	// could not be verified and were left in place (reason=unverified).
+	ReleaseRollbacks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hive_release_rollbacks_total",
+		Help: "HiveRelease targets rolled back (gate) or stopped unverified.",
+	}, []string{"release", "target", "reason"})
+
 	// ReconcileErrors counts failures per controller.
 	ReconcileErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hive_reconcile_errors_total",
@@ -122,6 +136,7 @@ func Register() {
 		ProviderUsedPercent, BudgetUsedTokens, BudgetLimitTokens, BudgetExhausted,
 		SharedAuthConsistent, CredentialPresent,
 		ReconcileMode, ActionsTotal, ReconcileErrors,
+		ReleaseTargetPhase, ReleaseRollbacks,
 	)
 }
 
@@ -143,4 +158,15 @@ func Action(controller, object, action string, applied bool) {
 		a = "true"
 	}
 	ActionsTotal.WithLabelValues(controller, object, action, a).Inc()
+}
+
+// SetReleasePhase records a release target's phase as a one-hot gauge set.
+func SetReleasePhase(release, target, phase string) {
+	for _, p := range []string{"Current", "Pending", "Held", "Rolling", "Soaking", "RolledBack", "Failed", "Drifted", "Unknown"} {
+		v := 0.0
+		if p == phase {
+			v = 1.0
+		}
+		ReleaseTargetPhase.WithLabelValues(release, target, p).Set(v)
+	}
 }
