@@ -23,7 +23,7 @@ metadata:
   name: fleet
 spec:
   namespace: hive
-  mode: Shadow
+  mode: Enforce
   scriptsConfigMap: hive-ops-scripts   # observed (hashed), never written
   template:
     image: alpine/k8s:1.37.1
@@ -65,6 +65,7 @@ spec:
       resources:
         requests: {cpu: 100m, memory: 64Mi}
         limits: {cpu: "1", memory: 512Mi}
+      suspend: true
     # Artificial Analysis agentic index → /state/hive-rotate/tiers.tsv, read
     # by school's bash hive-rotate. ModelLadder.spec.benchmarkURL already
     # reads the same feed; retire this with school's hive-rotate.
@@ -83,6 +84,7 @@ spec:
             secretKeyRef: {name: hive-secrets, key: AA_API_KEY, optional: true}
         - name: KUBECTL_REMOTE_COMMAND_WEBSOCKETS
           value: "false"
+      suspend: true
     # Per-backend model inventory → ConfigMap hive-model-inventory (read by
     # ModelLadder's inventory gate).
     - name: hive-inventory
@@ -140,3 +142,13 @@ spec:
   #   - {name: hive-watchdog-hanthor, reason: "HiveSpoke hanthor livenessMode=Enforce"}
   #   - {name: hive-rotate-reef, reason: "HiveSpoke reef rotationMode=Enforce"}
   #   - {name: hive-watchdog-reef, reason: "HiveSpoke reef livenessMode=Enforce"}
+
+  retire:
+    - name: hive-rotate-hanthor
+      reason: HiveSpoke hanthor rotationMode=Enforce
+    - name: hive-watchdog-hanthor
+      reason: HiveSpoke hanthor livenessMode=Enforce
+    - name: hive-rotate-reef
+      reason: HiveSpoke reef rotationMode=Enforce
+    - name: hive-watchdog-reef
+      reason: HiveSpoke reef livenessMode=Enforce

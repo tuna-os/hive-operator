@@ -22,7 +22,7 @@ spec:
   dirs: [".claude", ".gemini", ".codex"]
   # Enforce = hive-shared-auth.sh reconcile; interlocked on the incumbent
   # CronJob (suspend it via HiveHousekeeping/fleet in the same change).
-  mode: Shadow
+  mode: Enforce
   repairPermissions: true
   repairTheme: true
   repairAgyStatusLine: true
