@@ -32,8 +32,8 @@ spec:
   installationID: "137498420"
   primarySpoke: hive
   ladderRef: fleet
-  rotationMode: Shadow
-  livenessMode: Shadow           # watchdog + nudge: docs/liveness-promotion.md
+  rotationMode: Enforce          # promoted 2026-10-01
+  livenessMode: Enforce          # promoted 2026-10-01
   budget: {weeklyTokens: 0}      # uncapped
   holds: [reviewer]              # = HIVE_ROTATE_HOLD on the hive-rotate CronJob
   # HIVE_ROTATE_PIN=supervisor names the AGENT only: rotation leaves its
@@ -55,8 +55,8 @@ spec:
   installationID: "137498420"    # shares school's 7100/hr budget
   primarySpoke: hive
   ladderRef: fleet
-  rotationMode: Shadow
-  livenessMode: Shadow           # watchdog + nudge: docs/liveness-promotion.md
+  rotationMode: Enforce          # promoted 2026-10-01
+  livenessMode: Enforce          # promoted 2026-10-01
   pace: {fleetOrder: 1}
 ---
 apiVersion: hive.tunaos.org/v1alpha1
