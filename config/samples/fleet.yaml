@@ -69,8 +69,8 @@ spec:
   installationID: "158987150"
   primarySpoke: hive
   ladderRef: fleet
-  rotationMode: Shadow
-  livenessMode: Shadow           # watchdog + nudge: docs/liveness-promotion.md
+  rotationMode: Enforce          # promoted 2026-10-01; hive-rotate-hanthor suspended
+  livenessMode: Enforce          # watchdog + nudge: docs/liveness-promotion.md
   holds: [reviewer]              # = HIVE_ROTATE_HOLD on hive-rotate-hanthor
   pace: {fleetOrder: 2}
   repos: [indiafoss-companion, indiafoss-chat-android, dotfiles, hummingbird-github, reilly.asia, homebrew-tap]
