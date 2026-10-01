@@ -122,6 +122,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/tuna-os/ccleft v0.0.0-20260925113919-00ded18e65ed h1:53YYtICr53UVbATX0R1Yig03JdfvclPVoAfV9LcPUJc=
 github.com/tuna-os/ccleft v0.0.0-20260925113919-00ded18e65ed/go.mod h1:Z8dUO2JA5tNGq820FRBVGUQxPNGK8ZiTnE21wc1Qq8w=
+github.com/tuna-os/ccleft v0.0.0-20260925130840-de7f9518db19 h1:OxelWN+eTc3sIivsZhCQsWNhCLZkBLuoSlrXDN4qw1k=
+github.com/tuna-os/ccleft v0.0.0-20260925130840-de7f9518db19/go.mod h1:Z8dUO2JA5tNGq820FRBVGUQxPNGK8ZiTnE21wc1Qq8w=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
