@@ -1,0 +1,238 @@
+{
+  "generated_at": "2026-09-25T11:47:04.712778267Z",
+  "readings": [
+    {
+      "provider": "claude",
+      "account": "000000000000a001",
+      "homes": [
+        "hive:architect",
+        "hive:brainstorm",
+        "hive:ci-maintainer",
+        "hive:guide",
+        "hive:operations",
+        "hive:outreach",
+        "hive:quality",
+        "hive:reviewer",
+        "hive:scanner",
+        "hive:sec-check",
+        "hive:shared",
+        "hive:strategist",
+        "hive:supervisor",
+        "hive:telemetry"
+      ],
+      "state": "rate_limited",
+      "cause": "http_429",
+      "message": "HTTP 429: { \"error\": { \"type\": \"rate_limit_error\", \"message\": \"Rate limited. Please try again later.\" } }",
+      "plan": "max",
+      "windows": [],
+      "fetched_at": "2026-09-25T11:42:00.162702822Z",
+      "stale": false,
+      "retry_at": "2026-09-25T11:52:00.162708256Z"
+    },
+    {
+      "provider": "codex",
+      "account": "000000000000a002",
+      "homes": [
+        "hive:architect",
+        "hive:ci-maintainer",
+        "hive:guide",
+        "hive:operations",
+        "hive:outreach",
+        "hive:quality",
+        "hive:scanner",
+        "hive:sec-check",
+        "hive:shared",
+        "hive:strategist",
+        "hive:supervisor",
+        "hive:telemetry"
+      ],
+      "state": "limited",
+      "message": "provider reports limit_reached",
+      "plan": "prolite",
+      "windows": [
+        {
+          "id": "weekly",
+          "kind": "weekly",
+          "binding": true,
+          "used": 100,
+          "limit": 100,
+          "remaining": 0,
+          "used_pct": 100,
+          "remaining_pct": 0,
+          "resets_at": "2026-09-26T08:15:18Z",
+          "unit": "percent"
+        },
+        {
+          "id": "credits",
+          "kind": "credits",
+          "binding": false,
+          "remaining": 0,
+          "unit": "credits"
+        }
+      ],
+      "fetched_at": "2026-09-25T11:47:02.950904385Z",
+      "stale": false
+    },
+    {
+      "provider": "agy",
+      "account": "000000000000a003",
+      "homes": [
+        "hive:architect",
+        "hive:brainstorm",
+        "hive:ci-maintainer",
+        "hive:guide",
+        "hive:operations",
+        "hive:outreach",
+        "hive:quality",
+        "hive:reviewer",
+        "hive:scanner",
+        "hive:sec-check",
+        "hive:shared",
+        "hive:strategist",
+        "hive:supervisor",
+        "hive:telemetry"
+      ],
+      "state": "ok",
+      "windows": [
+        {
+          "id": "gemini-weekly",
+          "kind": "weekly",
+          "scope": "gemini",
+          "binding": true,
+          "used": 78.3264011144638,
+          "limit": 100,
+          "remaining": 21.673598885536194,
+          "used_pct": 78.3264011144638,
+          "remaining_pct": 21.673598885536194,
+          "resets_at": "2026-09-30T03:17:08Z",
+          "unit": "percent"
+        },
+        {
+          "id": "gemini-5h",
+          "kind": "five_hour",
+          "scope": "gemini",
+          "binding": true,
+          "used": 71.87770903110504,
+          "limit": 100,
+          "remaining": 28.12229096889496,
+          "used_pct": 71.87770903110504,
+          "remaining_pct": 28.12229096889496,
+          "resets_at": "2026-09-25T15:17:07Z",
+          "unit": "percent"
+        },
+        {
+          "id": "3p-weekly",
+          "kind": "weekly",
+          "scope": "3p",
+          "binding": true,
+          "used": 33.62001180648804,
+          "limit": 100,
+          "remaining": 66.37998819351196,
+          "used_pct": 33.62001180648804,
+          "remaining_pct": 66.37998819351196,
+          "resets_at": "2026-09-28T03:26:03Z",
+          "unit": "percent"
+        },
+        {
+          "id": "3p-5h",
+          "kind": "five_hour",
+          "scope": "3p",
+          "binding": true,
+          "used": 0,
+          "limit": 100,
+          "remaining": 100,
+          "used_pct": 0,
+          "remaining_pct": 100,
+          "resets_at": "2026-09-25T16:47:04Z",
+          "unit": "percent"
+        }
+      ],
+      "fetched_at": "2026-09-25T11:47:04.247263771Z",
+      "stale": false
+    },
+    {
+      "provider": "gemini",
+      "account": "000000000000a004",
+      "homes": [
+        "hive:architect",
+        "hive:brainstorm",
+        "hive:ci-maintainer",
+        "hive:guide",
+        "hive:operations",
+        "hive:outreach",
+        "hive:quality",
+        "hive:reviewer",
+        "hive:scanner",
+        "hive:sec-check",
+        "hive:shared",
+        "hive:strategist",
+        "hive:supervisor",
+        "hive:telemetry"
+      ],
+      "state": "unsupported",
+      "cause": "api_shutdown",
+      "message": "Google shut down quota reads for Gemini CLI personal OAuth in June 2026: loadCodeAssist returns UNSUPPORTED_CLIENT and retrieveUserQuota returns PERMISSION_DENIED; no remaining-quota source exists for this login type",
+      "windows": [],
+      "fetched_at": "2026-09-25T11:47:02.952960472Z",
+      "stale": false
+    },
+    {
+      "provider": "kiro",
+      "account": "000000000000a005",
+      "homes": [
+        "env"
+      ],
+      "state": "ok",
+      "plan": "KIRO POWER",
+      "windows": [
+        {
+          "id": "plan",
+          "kind": "monthly",
+          "binding": true,
+          "used": 3864.61,
+          "limit": 10000,
+          "remaining": 6135.389999999999,
+          "used_pct": 38.6461,
+          "remaining_pct": 61.3539,
+          "resets_at": "2026-10-01T00:00:00Z",
+          "unit": "credits"
+        }
+      ],
+      "fetched_at": "2026-09-25T11:47:04.712691697Z",
+      "stale": false
+    },
+    {
+      "provider": "deepseek",
+      "account": "000000000000a006",
+      "homes": [
+        "env"
+      ],
+      "state": "exhausted",
+      "message": "provider reports is_available=false",
+      "windows": [
+        {
+          "id": "balance:usd",
+          "kind": "balance",
+          "binding": true,
+          "remaining": -1.23,
+          "unit": "usd"
+        }
+      ],
+      "fetched_at": "2026-09-25T11:42:02.29611286Z",
+      "stale": false
+    },
+    {
+      "provider": "muse",
+      "account": "000000000000a007",
+      "homes": [
+        "env"
+      ],
+      "state": "unsupported",
+      "cause": "api_key_login",
+      "message": "Muse API-key logins cannot read the subscription quota; only the device-code (OAuth) login exposes it (not yet implemented)",
+      "windows": [],
+      "fetched_at": "2026-09-25T11:47:02.496532502Z",
+      "stale": false
+    }
+  ]
+}

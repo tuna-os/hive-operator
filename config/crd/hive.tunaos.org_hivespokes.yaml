@@ -61,6 +61,13 @@ spec:
           spec:
             description: HiveSpokeSpec is the desired state of one hive instance.
             properties:
+              agentTiers:
+                additionalProperties:
+                  type: string
+                description: |-
+                  AgentTiers maps agent → tier (T1/T2/T3). An agent with no tier is never
+                  placed. Default: hive-rotate.sh's AGENT_TIERS table.
+                type: object
               budget:
                 description: Budget caps weekly token spend. Omit or set 0 for uncapped.
                 properties:
@@ -76,6 +83,11 @@ spec:
                     format: int64
                     type: integer
                 type: object
+              contributorNamespace:
+                description: |-
+                  ContributorNamespace holds the fleet-wide contributor Deployments the
+                  PRIMARY spoke scales with provider headroom. Default hive-contributors.
+                type: string
               holds:
                 description: |-
                   Holds lists agents allowed to remain paused. Anything else found paused
@@ -103,6 +115,60 @@ spec:
                 description: Org is the GitHub account or organisation this spoke
                   acts on.
                 type: string
+              pace:
+                description: |-
+                  Pace tunes the burn-rate pacer (hive-pace.sh). It runs under
+                  RotationMode: Shadow plans, Enforce actuates this spoke's agents.
+                properties:
+                  disableKiroBudget:
+                    description: |-
+                      DisableKiroBudget paces Kiro with the generic fit instead of its credit
+                      budget (HIVE_PACE_KIRO_BUDGET=0).
+                    type: boolean
+                  disabled:
+                    type: boolean
+                  evictTargetMaxPct:
+                    description: 'EvictTargetMaxPct: a pool is a cap target only below
+                      this. Default 85.'
+                    format: int32
+                    type: integer
+                  fleetOrder:
+                    description: |-
+                      FleetOrder places this spoke in the fleet-wide pace order
+                      (HIVE_PACE_NAMESPACES "hive hive-reef hive-hanthor"): one notch per
+                      provider per tick goes to the FIRST eligible agent in that order. Lower
+                      first; ties by namespace.
+                    format: int32
+                    type: integer
+                  intervalMinutes:
+                    description: IntervalMinutes between pace ticks (the CronJob ran
+                      5,25,45). Default 20.
+                    format: int32
+                    type: integer
+                  kiroEvictTTLSeconds:
+                    description: 'KiroEvictTTLSeconds: how long a cap request stands.
+                      Default 21600.'
+                    format: int32
+                    type: integer
+                  kiroMaxDemote:
+                    description: Kiro demotions per tick. Default 4.
+                    format: int32
+                    type: integer
+                  kiroMaxEvict:
+                    description: Kiro cap requests (move off Kiro) per tick. Default
+                      2.
+                    format: int32
+                    type: integer
+                  kiroMaxPromote:
+                    description: Kiro promotions per tick. Default 1.
+                    format: int32
+                    type: integer
+                  kiroPromoteMax:
+                    description: |-
+                      KiroPromoteMax: promote only if the projected burn/allowed stays at or
+                      under this. Decimal string, default "0.8".
+                    type: string
+                type: object
               pins:
                 description: Pins fix individual agents' placement against rotation
                   and healing.
@@ -121,8 +187,10 @@ spec:
                       description: Agent is the agent name, e.g. "supervisor".
                       type: string
                     backend:
-                      description: 'Backend is the CLI that runs it: claude, codex,
-                        agy, pi.'
+                      description: |-
+                        Backend is the CLI that runs it: claude, codex, agy, pi. Optional:
+                        rotation only needs to know the agent is pinned (HIVE_ROTATE_PIN names
+                        agents, not placements); Backend/Model document the intended pair.
                       type: string
                     model:
                       description: |-
@@ -136,8 +204,6 @@ spec:
                       type: string
                   required:
                   - agent
-                  - backend
-                  - model
                   type: object
                 type: array
               primarySpoke:
@@ -153,6 +219,69 @@ spec:
                 items:
                   type: string
                 type: array
+              rotation:
+                description: Rotation tunes the placement policy. Every default is
+                  hive-rotate.sh's.
+                properties:
+                  agyMaxHighVolume:
+                    description: AgyMaxHighVolume caps high-volume agents on google
+                      per tick. Default 5.
+                    format: int32
+                    type: integer
+                  canaryCooldownMinutes:
+                    description: |-
+                      CanaryCooldownMinutes keeps canaries off a pool rotation just left
+                      because it was exhausted. Default 720.
+                    format: int32
+                    type: integer
+                  disableAutoResume:
+                    type: boolean
+                  disableCanaries:
+                    type: boolean
+                  disableMeteredFailover:
+                    type: boolean
+                  highVolumeCadenceSeconds:
+                    description: |-
+                      HighVolumeCadenceSeconds: agents kicked at least this often are
+                      high-volume — kept off openai (unless their provider is exhausted) and
+                      capped on google. Default 1800.
+                    format: int32
+                    type: integer
+                  intervalMinutes:
+                    description: |-
+                      IntervalMinutes between Enforce applies (the CronJobs ran every 20
+                      minutes; /api/status lags a mutation by minutes, so chained applies
+                      re-decide on stale state). The plan itself is recomputed every
+                      reconcile. Default 20.
+                    format: int32
+                    type: integer
+                  kiroMinCadenceSeconds:
+                    description: |-
+                      KiroMinCadenceSeconds: agents kicked more often than this never go on
+                      kiro, and are not sticky there, unless their current provider is
+                      positively exhausted. Default 900.
+                    format: int32
+                    type: integer
+                  peakProviders:
+                    description: |-
+                      PeakProviders are avoided (softly) during PeakWindows. Default none
+                      (DeepSeek, the only peak-priced pool, was dropped 2026-09-24).
+                    items:
+                      type: string
+                    type: array
+                  peakWindows:
+                    description: PeakWindows, UTC weekdays, "HH:MM-HH:MM,…". Default
+                      01:00-04:00,06:00-10:00.
+                    type: string
+                  thresholds:
+                    additionalProperties:
+                      format: int32
+                      type: integer
+                    description: |-
+                      Thresholds: provider → percent at which it counts as exhausted.
+                      Defaults: openai 85, anthropic 90, google 90, kiro 95, other 85.
+                    type: object
+                type: object
               rotationMode:
                 default: Shadow
                 description: |-
@@ -162,6 +291,20 @@ spec:
                 - Observe
                 - Shadow
                 - Enforce
+                type: string
+              rotationUsageSource:
+                description: |-
+                  RotationUsageSource selects the provider readings rotation plans from:
+                    UsagePool  (default) each provider's UsagePool .status.rotationReading:
+                               ccleft's /readings reduced exactly as hive-lib.sh's
+                               ccleft_probe does (HIVE_PROBE_SOURCE=ccleft, the bash
+                               default), falling back per provider to the ConfigMap below
+                               when the pool has no fresh reading. The ccusage sidecar is
+                               NOT needed for this.
+                    Probe      the hive/hive-provider-usage ConfigMap only.
+                enum:
+                - Probe
+                - UsagePool
                 type: string
             required:
             - namespace
@@ -175,6 +318,11 @@ spec:
                   description: AgentState is the observed state of one agent.
                   properties:
                     backend:
+                      type: string
+                    cadence:
+                      description: |-
+                        Cadence as /api/status renders it ("5m", "2h"). Rotation keeps
+                        high-volume agents (≤30m) off the subscription pools.
                       type: string
                     effort:
                       type: string
@@ -282,9 +430,180 @@ spec:
                   - type
                   type: object
                 type: array
+              contributorPlanText:
+                description: |-
+                  ContributorPlanText is the contributors section of the plan (primary
+                  spoke only), as hive-rotate.sh prints it.
+                items:
+                  type: string
+                type: array
               hiveID:
                 type: string
+              journal:
+                description: |-
+                  Journal is rotation's and the pacer's memory, owned by this
+                  controller once the spoke is in Enforce (the bash jobs kept it on the
+                  hive-ops-state PVC). In Shadow it stays empty and the planner infers
+                  pace demotions instead.
+                properties:
+                  canaryCooldown:
+                    description: |-
+                      CanaryCooldown: pools rotation evicted because they were exhausted
+                      (canary-cool-<provider>).
+                    items:
+                      description: ProviderCooldown keeps canaries off a provider
+                        until Until.
+                      properties:
+                        provider:
+                          type: string
+                        until:
+                          format: date-time
+                          type: string
+                      required:
+                      - provider
+                      - until
+                      type: object
+                    type: array
+                  kiroEvict:
+                    description: 'KiroEvict: the pacer''s requests to move agents
+                      off Kiro (kiro-evict).'
+                    items:
+                      description: KiroEvictRequest asks rotation to move an agent
+                        off Kiro onto Targets.
+                      properties:
+                        agent:
+                          type: string
+                        expiry:
+                          format: date-time
+                          type: string
+                        targets:
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - agent
+                      - expiry
+                      - targets
+                      type: object
+                    type: array
+                  paceDemoted:
+                    description: |-
+                      PaceDemoted: the ORIGINAL rung the pacer demoted each agent from
+                      (pace-demoted). Rotation counts a demoted rung as in-tier; the pacer
+                      restores only these.
+                    items:
+                      description: JournalPlacement is one journal row.
+                      properties:
+                        agent:
+                          type: string
+                        at:
+                          format: date-time
+                          type: string
+                        backend:
+                          type: string
+                        inferred:
+                          description: |-
+                            Inferred: seeded from the placement itself when the spoke was
+                            promoted (the bash journal was not imported), not written by an
+                            action of this controller.
+                          type: boolean
+                        model:
+                          type: string
+                        provider:
+                          type: string
+                      required:
+                      - agent
+                      - backend
+                      - model
+                      type: object
+                    type: array
+                  stranded:
+                    description: |-
+                      Stranded: agents rotation paused because their provider ran dry and
+                      no rung would take them (/state/…/stranded).
+                    items:
+                      description: JournalPlacement is one journal row.
+                      properties:
+                        agent:
+                          type: string
+                        at:
+                          format: date-time
+                          type: string
+                        backend:
+                          type: string
+                        inferred:
+                          description: |-
+                            Inferred: seeded from the placement itself when the spoke was
+                            promoted (the bash journal was not imported), not written by an
+                            action of this controller.
+                          type: boolean
+                        model:
+                          type: string
+                        provider:
+                          type: string
+                      required:
+                      - agent
+                      - backend
+                      - model
+                      type: object
+                    type: array
+                type: object
               observedAt:
+                format: date-time
+                type: string
+              pacePlan:
+                description: |-
+                  PacePlan is the pacer's actions for THIS spoke's agents at the last
+                  pace tick.
+                items:
+                  description: RotationDecision is one auditable placement decision.
+                  properties:
+                    action:
+                      description: 'Action: move, strand, resume or canary.'
+                      type: string
+                    agent:
+                      type: string
+                    applied:
+                      type: boolean
+                    error:
+                      type: string
+                    fromBackend:
+                      type: string
+                    fromEffort:
+                      type: string
+                    fromModel:
+                      type: string
+                    fromProvider:
+                      type: string
+                    reason:
+                      type: string
+                    toBackend:
+                      type: string
+                    toEffort:
+                      type: string
+                    toModel:
+                      type: string
+                    toProvider:
+                      type: string
+                  required:
+                  - agent
+                  - applied
+                  - reason
+                  - toBackend
+                  - toModel
+                  - toProvider
+                  type: object
+                type: array
+              pacePlanText:
+                description: |-
+                  PacePlanText is the FLEET-wide pace plan as hive-pace apply prints it
+                  (verdict table, kiro budget, actions, footer), for diffing against the
+                  hive-pace job log.
+                items:
+                  type: string
+                type: array
+              paceTickAt:
+                description: PaceTickAt is the last pace tick.
                 format: date-time
                 type: string
               providers:
@@ -316,6 +635,16 @@ spec:
                 type: array
               reachable:
                 type: boolean
+              rotationAppliedAt:
+                description: RotationAppliedAt is the last Enforce apply (rotation.intervalMinutes).
+                format: date-time
+                type: string
+              rotationInputs:
+                description: |-
+                  RotationInputs records what the plan was computed from ("Probe
+                  hive/hive-provider-usage @ 2026-09-24T17:12:32Z"), so a disagreement
+                  can be attributed to inputs rather than logic.
+                type: string
               rotationPlan:
                 description: |-
                   RotationPlan is replaced on every reconcile. In Shadow it is the exact
@@ -323,6 +652,9 @@ spec:
                 items:
                   description: RotationDecision is one auditable placement decision.
                   properties:
+                    action:
+                      description: 'Action: move, strand, resume or canary.'
+                      type: string
                     agent:
                       type: string
                     applied:
@@ -334,6 +666,8 @@ spec:
                     fromEffort:
                       type: string
                     fromModel:
+                      type: string
+                    fromProvider:
                       type: string
                     reason:
                       type: string
@@ -353,6 +687,14 @@ spec:
                   - toModel
                   - toProvider
                   type: object
+                type: array
+              rotationPlanText:
+                description: |-
+                  RotationPlanText is the plan rendered exactly as `hive-rotate.sh plan`
+                  prints it (agent lines + footer, without the contributors section), so
+                  shadow output can be diffed against the bash job's log with plain diff.
+                items:
+                  type: string
                 type: array
             type: object
         type: object

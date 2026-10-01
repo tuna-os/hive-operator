@@ -12,6 +12,8 @@ import (
 	"html/template"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -45,12 +47,77 @@ type authRow struct {
 	Message          string
 }
 
+type poolRow struct {
+	Pool, Provider, Window, Unit           string
+	Used, Reading, Consumed, Limit, Source string
+	Remaining, Burn, ETA, Resets, Agents   string
+	Hot, Unknown                           bool
+}
+
+type planRow struct {
+	Spoke, Line string
+	Mutates     bool
+}
+
 type page struct {
 	Spokes  []spokeRow
 	Agents  []agentRow
+	Pools   []poolRow
+	Plans   []planRow
 	Auth    []authRow
 	Pending []string
 	Now     string
+}
+
+// num trims the status decimal strings for display.
+func num(s string) string {
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return s
+	}
+	switch {
+	case v == -1:
+		return "—"
+	case v >= 100 || v <= -100:
+		return strconv.FormatFloat(v, 'f', 0, 64)
+	}
+	return strconv.FormatFloat(v, 'f', 2, 64)
+}
+
+func poolRows(pools []hivev1.UsagePool, now time.Time) []poolRow {
+	var out []poolRow
+	for _, p := range pools {
+		unit := p.Spec.Unit
+		if unit == "" {
+			unit = "costUSD"
+		}
+		for _, w := range p.Status.Windows {
+			r := poolRow{Pool: p.Name, Provider: p.Spec.Provider, Window: w.Name, Unit: unit,
+				Used: num(w.UsedPercent), Reading: num(w.ReadingPercent), Consumed: num(w.Consumed),
+				Limit: num(w.Limit), Source: w.LimitSource, Remaining: num(w.Remaining), Burn: num(w.BurnPerHour)}
+			if w.Limit == "" {
+				r.Limit, r.Remaining = "—", "—"
+			}
+			if v, err := strconv.ParseFloat(w.UsedPercent, 64); err == nil {
+				r.Hot, r.Unknown = v >= 85, v < 0
+			}
+			if w.ExhaustionETA != nil {
+				r.ETA = w.ExhaustionETA.Sub(now).Round(time.Minute).String()
+			}
+			if w.ResetsAt != nil {
+				r.Resets = w.ResetsAt.UTC().Format("Mon 15:04Z")
+			}
+			var top []string
+			for _, a := range p.Status.Agents {
+				if a.Window == w.Name && len(top) < 4 {
+					top = append(top, fmt.Sprintf("%s %s", a.Agent, num(a.Consumed)))
+				}
+			}
+			r.Agents = strings.Join(top, ", ")
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func humanAge(s int64) (string, bool) {
@@ -109,6 +176,17 @@ func (s *Server) Handler() http.Handler {
 				})
 			}
 			p.Spokes = append(p.Spokes, row)
+		}
+
+		var pools hivev1.UsagePoolList
+		if err := s.Client.List(ctx, &pools); err == nil {
+			p.Pools = poolRows(pools.Items, time.Now())
+		}
+		for _, sp := range spokes.Items {
+			for _, l := range sp.Status.RotationPlanText {
+				mut := strings.Contains(l, "->") || strings.Contains(l, "STRANDED")
+				p.Plans = append(p.Plans, planRow{Spoke: sp.Name, Line: l, Mutates: mut})
+			}
 		}
 
 		var auths hivev1.SharedAuthList
@@ -185,6 +263,18 @@ var tmpl = template.Must(template.New("p").Parse(`<!doctype html>
 <td>{{.Backend}}<td>{{.Model}}
 <td>{{if .IdleWarn}}<span class="warn">{{.Idle}}</span>{{else}}{{.Idle}}{{end}}
 <td>{{if .OnDemand}}<span class="ok">on-demand</span>{{else if .Paused}}<span class="bad">paused ({{.Trigger}})</span>{{else}}<span class="ok">running</span>{{end}}</tr>{{end}}</table>
+
+<h2>provider pools <span class="ok">— consumption from session logs (ccusage); used% is the provider's own reading when fresh</span></h2>
+<table><tr><th>pool<th>window<th>used%<th>reading%<th>consumed<th>limit<th>remaining<th>burn/h<th>exhausts in<th>resets<th>top agents</tr>
+{{range .Pools}}<tr>
+<td>{{.Pool}}<td>{{.Window}}
+<td>{{if .Unknown}}<span class="ok">unmeasured</span>{{else if .Hot}}<span class="bad">{{.Used}}</span>{{else}}{{.Used}}{{end}}
+<td>{{.Reading}}<td>{{.Consumed}} <span class="ok">{{.Unit}}</span><td>{{.Limit}} <span class="pill">{{.Source}}</span>
+<td>{{.Remaining}}<td>{{.Burn}}<td>{{if .ETA}}<span class="warn">{{.ETA}}</span>{{else}}<span class="ok">—</span>{{end}}<td>{{.Resets}}<td>{{.Agents}}</tr>{{end}}</table>
+
+{{if .Plans}}<h2>rotation plan <span class="ok">— shadow: what the operator would do, in hive-rotate.sh's format</span></h2>
+<table><tr><th>spoke<th>decision</tr>
+{{range .Plans}}<tr><td>{{.Spoke}}<td><code>{{if .Mutates}}<span class="warn">{{.Line}}</span>{{else}}{{.Line}}{{end}}</code></tr>{{end}}</table>{{end}}
 
 <h2>shared credentials</h2>
 <table><tr><th>store<th>namespace<th>dirs (write-through)<th>token</tr>

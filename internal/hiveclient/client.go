@@ -169,3 +169,22 @@ func (c *Client) Secret(ctx context.Context, ns, name, key string) (string, erro
 	}
 	return string(v), nil
 }
+
+// Clientset exposes the typed client (contributor Deployments).
+func (c *Client) Clientset() kubernetes.Interface {
+	if c == nil {
+		return nil
+	}
+	return c.cs
+}
+
+// Scale sets a Deployment's replica count through its scale subresource.
+func (c *Client) Scale(ctx context.Context, ns, name string, replicas int32) error {
+	s, err := c.cs.AppsV1().Deployments(ns).GetScale(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	s.Spec.Replicas = replicas
+	_, err = c.cs.AppsV1().Deployments(ns).UpdateScale(ctx, name, s, metav1.UpdateOptions{})
+	return err
+}

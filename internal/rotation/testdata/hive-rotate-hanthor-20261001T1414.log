@@ -1,0 +1,16 @@
+usage: from ccleft (generated 2026-10-01T14:13:49Z)
+supervisor     meta      muse-spark-1.3-contributor ok
+scanner        kiro      kiro-api-key/claude-haiku-4-5:low ok (pace-demoted from kiro-api-key/claude-sonnet-5:medium)
+ci-maintainer  kiro      kiro-api-key/claude-haiku-4-5:low ok (pace-demoted from kiro-api-key/claude-sonnet-5:medium)
+quality        kiro      kiro-api-key/claude-haiku-4-5:low ok (pace-demoted from kiro-api-key/claude-sonnet-5:medium)
+architect      kiro      kiro-api-key/claude-haiku-4-5:low ok (pace-demoted from kiro-api-key/claude-opus-5:high)
+guide          kiro      kiro-api-key/claude-haiku-4-5:low ok (pace-demoted from kiro-api-key/claude-sonnet-5:medium)
+sec-check      kiro      kiro-api-key/claude-sonnet-5:high ok (pace-demoted from kiro-api-key/claude-opus-5:high)
+telemetry      kiro      kiro-api-key/claude-sonnet-5:medium ok
+operations     kiro      kiro-api-key/claude-sonnet-5:medium ok
+strategist     kiro      kiro-api-key/claude-opus-5:high ok
+
+contributors:
+contributors: skipped — pool is managed by the primary hive (hive), not hive-hanthor
+
+fleet already on the best available rung

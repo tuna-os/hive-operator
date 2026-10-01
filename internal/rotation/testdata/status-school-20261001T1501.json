@@ -1,0 +1,159 @@
+{
+  "timestamp": "2026-10-01T14:45:10Z",
+  "agents": [
+    {
+      "name": "supervisor",
+      "cli": "agy",
+      "govModel": "gemini-3.8-flash-medium",
+      "model": "gemini-3.8-flash-medium",
+      "reasoningEffort": "medium",
+      "cadence": "paused",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "scanner",
+      "cli": "muse",
+      "govModel": "muse-spark-1.3-contributor",
+      "model": "muse-spark-1.3-contributor",
+      "reasoningEffort": null,
+      "cadence": "1h",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "reviewer",
+      "cli": "agy",
+      "govModel": "gemini-3.8-flash-medium",
+      "model": "gemini-3.8-flash-medium",
+      "reasoningEffort": "medium",
+      "cadence": "30m",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "adjudicator",
+      "cli": "codex",
+      "govModel": "gpt-6-sol",
+      "model": "gpt-6-sol",
+      "reasoningEffort": null,
+      "cadence": "30m",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "ci-maintainer",
+      "cli": "muse",
+      "govModel": "muse-spark-1.3-contributor",
+      "model": "muse-spark-1.3-contributor",
+      "reasoningEffort": "low",
+      "cadence": "3h",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "quality",
+      "cli": "muse",
+      "govModel": "muse-spark-1.3-contributor",
+      "model": "muse-spark-1.3-contributor",
+      "reasoningEffort": "low",
+      "cadence": "3h",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "architect",
+      "cli": "pi",
+      "govModel": "kiro-api-key/claude-haiku-4-5:low",
+      "model": "kiro-api-key/claude-haiku-4-5:low",
+      "reasoningEffort": "low",
+      "cadence": "15m",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "guide",
+      "cli": "pi",
+      "govModel": "kiro-api-key/claude-haiku-4-5:low",
+      "model": "kiro-api-key/claude-haiku-4-5:low",
+      "reasoningEffort": "low",
+      "cadence": "4h",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "outreach",
+      "cli": "pi",
+      "govModel": "kiro-api-key/claude-haiku-4-5:low",
+      "model": "kiro-api-key/claude-haiku-4-5:low",
+      "reasoningEffort": "low",
+      "cadence": "30m",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "sec-check",
+      "cli": "pi",
+      "govModel": "kiro-api-key/claude-haiku-4-5:low",
+      "model": "kiro-api-key/claude-haiku-4-5:low",
+      "reasoningEffort": "high",
+      "cadence": "2h",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "telemetry",
+      "cli": "pi",
+      "govModel": "kiro-api-key/claude-sonnet-5:medium",
+      "model": "kiro-api-key/claude-sonnet-5:medium",
+      "reasoningEffort": "low",
+      "cadence": "24h",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "operations",
+      "cli": "pi",
+      "govModel": "kiro-api-key/claude-sonnet-5:medium",
+      "model": "kiro-api-key/claude-sonnet-5:medium",
+      "reasoningEffort": "low",
+      "cadence": "24h",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "strategist",
+      "cli": "pi",
+      "govModel": "kiro-api-key/claude-haiku-4-5:low",
+      "model": "kiro-api-key/claude-haiku-4-5:low",
+      "reasoningEffort": "high",
+      "cadence": "30m",
+      "paused": false,
+      "pausedTrigger": null,
+      "onDemand": null
+    },
+    {
+      "name": "brainstorm",
+      "cli": "agy",
+      "govModel": "gemini-3.8-flash-low",
+      "model": "gemini-3.8-flash-low",
+      "reasoningEffort": null,
+      "cadence": "",
+      "paused": true,
+      "pausedTrigger": "startup",
+      "onDemand": true
+    }
+  ]
+}

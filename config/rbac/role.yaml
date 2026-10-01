@@ -8,6 +8,16 @@ rules:
   - ""
   resources:
   - configmaps
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - nodes
   - pods
   - secrets
@@ -39,12 +49,21 @@ rules:
   - patch
   - watch
 - apiGroups:
+  - apps
+  resources:
+  - deployments/scale
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - hive.tunaos.org
   resources:
   - hivereleases
   - hivespokes
   - modelladders
   - sharedauths
+  - usagepools
   verbs:
   - get
   - list
@@ -58,6 +77,7 @@ rules:
   - hivespokes/status
   - modelladders/status
   - sharedauths/status
+  - usagepools/status
   verbs:
   - get
   - patch
