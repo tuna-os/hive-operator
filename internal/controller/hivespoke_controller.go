@@ -16,6 +16,7 @@ import (
 
 	hivev1 "github.com/tuna-os/hive-operator/api/v1alpha1"
 	"github.com/tuna-os/hive-operator/internal/hiveclient"
+	"github.com/tuna-os/hive-operator/internal/liveness"
 	"github.com/tuna-os/hive-operator/internal/metrics"
 	"github.com/tuna-os/hive-operator/internal/rotation"
 )
@@ -44,6 +45,10 @@ type HiveSpokeReconciler struct {
 	Actuator rotation.Actuator
 	// Now overrides the clock (tests).
 	Now func() time.Time
+	// Liveness overrides the watchdog/nudge API (tests). Nil: bound to the
+	// spoke's pod and X-Hive-Internal token. Mutations happen only when the
+	// spoke's livenessMode is Enforce.
+	Liveness LivenessAPI
 }
 
 // rawAgent is one agent entry as /api/status reports it, before folding in
@@ -60,12 +65,20 @@ type rawAgent struct {
 	PausedTrigger string `json:"pausedTrigger"`
 	PausedReason  string `json:"pausedReason"`
 	OnDemand      *bool  `json:"onDemand"`
+	// Liveness fields (watchdog/nudge).
+	Busy          string `json:"busy"`
+	LiveSummary   string `json:"liveSummary"`
+	NeedsLogin    bool   `json:"needsLogin"`
+	AuthKnown     bool   `json:"authKnown"`
+	AuthAvailable bool   `json:"authAvailable"`
+	Enabled       *bool  `json:"enabled"`
 }
 
 // statusResponse is the subset of /api/status this operator reads.
 type statusResponse struct {
-	Agents []rawAgent     `json:"agents"`
-	Budget map[string]any `json:"budget"`
+	Timestamp string         `json:"timestamp"`
+	Agents    []rawAgent     `json:"agents"`
+	Budget    map[string]any `json:"budget"`
 }
 
 // Reading /api/status needs the spoke's dashboard token, which lives in the
@@ -157,26 +170,9 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	metrics.AgentsTotal.WithLabelValues(sp.Name, "paused").Set(float64(obs.Paused))
 	metrics.AgentsTotal.WithLabelValues(sp.Name, "on_demand").Set(float64(obs.OnDemand))
 
-	// Build the same placement decision set in Shadow and Enforce. Keeping one
-	// planner is what makes a week of shadow output meaningful: promotion only
-	// changes whether the already-visible actions are applied.
-	now := time.Now().UTC()
-	if r.Now != nil {
-		now = r.Now().UTC()
-	}
-	readings, sources := r.rotationReadings(ctx, &sp, now)
-	sp.Status.Providers = providerStates(&sp, readings)
-	sp.Status.RotationPlan, sp.Status.RotationPlanText, sp.Status.RotationInputs = nil, nil, ""
-	if rotationMode != hivev1.ModeObserve {
-		act := r.Actuator
-		if act == nil && r.Hive != nil {
-			act = &rotation.HiveActuator{API: boundAPI{c: r.Hive, pod: pod, token: token}}
-		}
-		r.rotate(ctx, &sp, rotationMode, readings, sources, act, now)
-	}
-
 	// Budget. BUDGET_EXHAUSTED is the governor's own suppression gate: when it
 	// is true, an empty agents_due list means "told not to spend", not "broken".
+	// Read before liveness: nudge must never kick past it.
 	if v, ok := numFrom(sr.Budget, "BUDGET_USED"); ok {
 		sp.Status.BudgetUsedTokens = int64(v)
 		metrics.BudgetUsedTokens.WithLabelValues(sp.Name).Set(v)
@@ -192,6 +188,45 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		metrics.BudgetExhausted.WithLabelValues(sp.Name).Set(b2f(b))
 	}
 
+	// Build the same placement decision set in Shadow and Enforce. Keeping one
+	// planner is what makes a week of shadow output meaningful: promotion only
+	// changes whether the already-visible actions are applied.
+	now := time.Now().UTC()
+	if r.Now != nil {
+		now = r.Now().UTC()
+	}
+	readings, sources := r.rotationReadings(ctx, &sp, now)
+	sp.Status.Providers = providerStates(&sp, readings)
+	sp.Status.RotationPlan, sp.Status.RotationPlanText, sp.Status.RotationInputs = nil, nil, ""
+	bound := boundAPI{c: r.Hive, pod: pod, token: token}
+	if rotationMode != hivev1.ModeObserve {
+		act := r.Actuator
+		if act == nil && r.Hive != nil {
+			act = &rotation.HiveActuator{API: bound}
+		}
+		r.rotate(ctx, &sp, rotationMode, readings, sources, act, now)
+	}
+
+	// Liveness: the watchdog (5 min) and nudge (30 min) passes, under
+	// livenessMode, AFTER rotation so a wake-up can make rotation due and a
+	// rotation apply this reconcile defers the watchdog.
+	lapi := r.Liveness
+	if lapi == nil && r.Hive != nil {
+		lapi = bound
+	}
+	li := livenessInputs{ages: ages, budget: sr.Budget, readings: readings, sources: sources}
+	if t, err := time.Parse(time.RFC3339, sr.Timestamp); err == nil {
+		li.snapshot = t
+	}
+	for i, a := range sr.Agents {
+		st := obs.Agents[i]
+		li.agents = append(li.agents, liveness.Agent{Name: st.Name, CLI: st.Backend, Model: st.Model, Effort: st.Effort,
+			Paused: st.Paused, Busy: a.Busy, NeedsLogin: a.NeedsLogin, AuthKnown: a.AuthKnown, AuthAvailable: a.AuthAvailable,
+			LiveSummary: a.LiveSummary})
+		li.nudge = append(li.nudge, liveness.NudgeAgent{Name: st.Name, Paused: st.Paused, OnDemand: st.OnDemand, Enabled: a.Enabled})
+	}
+	r.liveness(ctx, &sp, li, lapi, now)
+
 	metrics.SpokeReachable.WithLabelValues(sp.Name, sp.Spec.Namespace).Set(1)
 	sp.Status.Reachable = true
 	observed := metav1.NewTime(now)
@@ -199,7 +234,31 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := r.Status().Update(ctx, &sp); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: iv}, nil
+	return ctrl.Result{RequeueAfter: requeueAfter(&sp, rotationMode, iv, now)}, nil
+}
+
+// requeueAfter is the reconcile interval, shortened to land on the next
+// liveness pass (5 min does not divide by 2) or, after a renewal wake-up
+// made an Enforce rotation due, to apply it promptly.
+func requeueAfter(sp *hivev1.HiveSpoke, rotationMode hivev1.ReconcileMode, iv time.Duration, now time.Time) time.Duration {
+	next := iv
+	if l := sp.Status.Liveness; rotationMode == hivev1.ModeEnforce && sp.Status.RotationAppliedAt == nil &&
+		l != nil && l.WatchdogAt != nil && l.WatchdogAt.Time.Equal(now) {
+		for _, a := range l.WatchdogPlan {
+			if a.Kind == liveness.KindWake && a.Applied {
+				next = 10 * time.Second
+			}
+		}
+	}
+	if due := livenessNextDue(sp); !due.IsZero() {
+		if d := due.Sub(now); d < next {
+			next = d
+		}
+	}
+	if next < 10*time.Second {
+		next = 10 * time.Second
+	}
+	return next
 }
 
 // runtimeAgentOverride is one agent's entry in the persisted override journal

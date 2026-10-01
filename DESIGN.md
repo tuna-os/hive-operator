@@ -325,12 +325,12 @@ In Enforce the operator owns these journals, in status or a ConfigMap. Until the
 |---|---|---|---|
 | `hive-rotate`, `-reef`, `-hanthor` (*/20; apply mode) | HiveSpoke Rotation (`rotation.Compute` + `HiveActuator`) | 7 days of `hive-shadow-diff` = 0 differences on every tick for each spoke. Every remaining diff explained by a listed diff class (§7), then those classes closed by moving the journals into the operator | wire `HiveActuator` in `cmd/main.go` behind `--enable-rotation-enforce`; set `rotationMode: Enforce` on **one** spoke (reef first: no pins, no cache); `kubectl patch cronjob hive-rotate-reef -p '{"spec":{"suspend":true}}'` in the same change. Then hanthor, then school |
 | the probe half of `hive-rotate` (`probe_all`, publishes `hive-provider-usage`) | UsagePool (consumption + learned limit), later hive v5 `/api/providers/headroom` | per pool, `\|reading% − 100×ratio\| ≤ 5` for 7 days (alert above), `Priced=True`, contributor pods covered | flip `rotationUsageSource: UsagePool` per spoke. The probe keeps publishing (calibration) until v5 headroom works; then point `UsagePool.spec.reading` at v5 and delete the bash probe |
-| `hive-watchdog`, `-reef`, `-hanthor` (*/5) | Watchdog controller (roadmap 4) | pane classification diff against the job log | same pattern. Rotation must be enforced first: the watchdog's `choose_rung_healthy` escape hatch rotates |
+| `hive-watchdog`, `-reef`, `-hanthor` (*/5) | HiveSpoke liveness (`liveness.Watchdog`, `spec.livenessMode`) | `hive-shadow-diff --live --liveness`: 0 `logic` differences for 24 h incl. a real heal | `livenessMode: Enforce` + suspend that spoke's watchdog CronJob ([docs/liveness-promotion.md](docs/liveness-promotion.md)). Rotation first: rotate-offs and renewal wake-ups are placements, applied only under `rotationMode: Enforce` |
 | `hive-pace` (5,25,45) | Pace on UsagePool burn/ETA + `rung_down` | pace verdicts (hot/cold/on-pace) from pools match `hive-pace status` for 7 days | enforce + suspend `hive-pace`; the pacer's journal moves into operator status, and Rotation reads it (closes the pace-demotion inference) |
 | `hive-tiers` (daily) | ModelLadder `benchmarkURL` + bands | `ladder.status.effective` ⊇ `tiers.tsv` rows | suspend `hive-tiers`; point the ladder at the AA feed |
 | `hive-inventory` (daily) | stays (ModelLadder reads its ConfigMap) | — | — |
 | `hive-shared-auth` (*/30) | SharedAuth (already in Shadow) | existing | enforce + suspend, independent of this work |
-| `hive-nudge` | Nudge (roadmap 5) | — | — |
+| `hive-nudge` (:13,:43) | HiveSpoke liveness (`liveness.Nudge`, same field) | same diff (nudge section) | narrow `HIVE_NUDGE_NAMESPACES` per promoted spoke; suspend with the last |
 | `hive-peak-pause`/`-resume` | Rotation peak holds, later | — | — |
 
 **The Enforce step** is per spoke, rotate and pace together: [docs/rotation-promotion.md](docs/rotation-promotion.md).
@@ -367,4 +367,4 @@ In Enforce the operator owns these journals, in status or a ConfigMap. Until the
 - **Back-filled windows are approximate** until one full window of measured deltas has accumulated after a (re)start. `primed` and back-fill are visible in status.
 - **Read-only SQLite on a live WAL.** It worked on read-only copies with existing `-wal`/`-shm`. Verify on rollout via `hive_usage_collect_success{source="antigravity"}`.
 - **Rotation's Enforce is wired but no spoke uses it yet.** The earlier kick-after-place behaviour was dropped to match bash.
-- **The watchdog is not ported.** `hive-watchdog-<spoke>` keeps running after promotion; its renewal wake-up re-runs a bash rotate apply (see the promotion doc's caveats).
+- **The watchdog and nudge are ported but Shadow.** `hive-watchdog-<spoke>` keeps running until that spoke's `livenessMode` is promoted; until then its renewal wake-up re-runs a bash rotate apply (see the promotion docs' caveats).

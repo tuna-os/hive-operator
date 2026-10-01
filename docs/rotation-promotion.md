@@ -27,7 +27,8 @@ restarted ~25 times in one evening when pace and rotate disagreed.
 |---|---|
 | `hive-rotate-X` (apply, */20) | suspended — operator rotation for X |
 | `hive-pace` (5,25,45, every namespace in `HIVE_PACE_NAMESPACES`) | X removed from `HIVE_PACE_NAMESPACES`; suspended with the last spoke |
-| `hive-watchdog-X` (*/5) | **stays** (watchdog is not ported) — see caveats |
+| `hive-watchdog-X` (*/5) | **stays** until X's `livenessMode` is promoted ([liveness-promotion.md](liveness-promotion.md)) — see caveats |
+| `hive-nudge` (:13,:43, every namespace in `HIVE_NUDGE_NAMESPACES`) | stays; narrowed per spoke by liveness promotion, not rotation |
 | journals on the `hive-ops-state` PVC (`stranded`, `pace-demoted`, `kiro-evict`, `canary-cool-*`) | X's rows live in `HiveSpoke X .status.journal`; pace-demoted rows are seeded from the live placement at promotion (condition `PaceJournalSeeded`) |
 | `hive/hive-provider-usage` publication (primary rotate) | the operator republishes it once **school** is in Enforce |
 | contributor replica scaling (primary rotate) | the operator, once **school** is in Enforce |
@@ -146,13 +147,16 @@ What the bash side then sees:
 
 ## Known caveats while spokes are mixed
 
-- **hive-watchdog-X keeps running** (the watchdog is not ported). Its healing
-  is unaffected, but two of its paths place agents: the renewal wake-up runs a
-  full `hive-rotate.sh apply` for X when a provider reset passes, and the
-  auth/shell/approval rotate-off uses `choose_rung_healthy`. The planners agree
-  (shadow diff), so the renewal apply makes the operator's placement a second
-  time; the rotate-off is a watchdog decision the operator then keeps (a
-  healthy in-tier rung is sticky). Port the watchdog before suspending it.
+- **hive-watchdog-X keeps running until X's liveness is promoted**
+  (`spec.livenessMode`, [liveness-promotion.md](liveness-promotion.md)). Its
+  healing is unaffected, but two of its paths place agents: the renewal
+  wake-up runs a full `hive-rotate.sh apply` for X when a provider reset
+  passes, and the auth/shell/approval rotate-off uses `choose_rung_healthy`.
+  The planners agree (shadow diff), so the renewal apply makes the operator's
+  placement a second time; the rotate-off is a watchdog decision the operator
+  then keeps (a healthy in-tier rung is sticky). Promote rotation first, then
+  liveness: the operator's own watchdog applies rotate-offs and renewal
+  wake-ups only when `rotationMode` is Enforce too.
 - **Kiro budget during the mixed window**: bash pace computes the budget over
   its namespaces' agents, the operator over the whole fleet but applies only
   its own spoke's share. Both see the same Kiro burn, so in one tick each may

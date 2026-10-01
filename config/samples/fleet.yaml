@@ -33,6 +33,7 @@ spec:
   primarySpoke: hive
   ladderRef: fleet
   rotationMode: Shadow
+  livenessMode: Shadow           # watchdog + nudge: docs/liveness-promotion.md
   budget: {weeklyTokens: 0}      # uncapped
   holds: [reviewer]              # = HIVE_ROTATE_HOLD on the hive-rotate CronJob
   # HIVE_ROTATE_PIN=supervisor names the AGENT only: rotation leaves its
@@ -55,6 +56,7 @@ spec:
   primarySpoke: hive
   ladderRef: fleet
   rotationMode: Shadow
+  livenessMode: Shadow           # watchdog + nudge: docs/liveness-promotion.md
   pace: {fleetOrder: 1}
 ---
 apiVersion: hive.tunaos.org/v1alpha1
@@ -68,6 +70,7 @@ spec:
   primarySpoke: hive
   ladderRef: fleet
   rotationMode: Shadow
+  livenessMode: Shadow           # watchdog + nudge: docs/liveness-promotion.md
   holds: [reviewer]              # = HIVE_ROTATE_HOLD on hive-rotate-hanthor
   pace: {fleetOrder: 2}
   repos: [indiafoss-companion, indiafoss-chat-android, dotfiles, hummingbird-github, reilly.asia, homebrew-tap]

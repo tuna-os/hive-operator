@@ -82,6 +82,9 @@ T3|meta|muse|muse-spark-1.3-contributor`
 		if s.Spec.RotationMode != hivev1.ModeShadow {
 			t.Errorf("%s: rotationMode %s — promotion is a separate, reviewed change", name, s.Spec.RotationMode)
 		}
+		if s.Spec.LivenessMode != hivev1.ModeShadow {
+			t.Errorf("%s: livenessMode %s — promotion is a separate, reviewed change (docs/liveness-promotion.md)", name, s.Spec.LivenessMode)
+		}
 	}
 	if spokes["school"].Spec.Pace.FleetOrder != 0 || spokes["reef"].Spec.Pace.FleetOrder != 1 || spokes["hanthor"].Spec.Pace.FleetOrder != 2 {
 		t.Error("pace fleetOrder must follow HIVE_PACE_NAMESPACES: hive hive-reef hive-hanthor")

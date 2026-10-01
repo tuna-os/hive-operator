@@ -108,6 +108,91 @@ spec:
                 description: LadderRef selects the ModelLadder this spoke places agents
                   from.
                 type: string
+              liveness:
+                description: Liveness tunes the watchdog and nudge. Every default
+                  is the bash one.
+                properties:
+                  backoffBaseMinutes:
+                    description: |-
+                      BackoffBaseMinutes/BackoffMaxMinutes: per-agent exponential heal
+                      backoff, base, 2×base … capped. Defaults 5 and 120.
+                    format: int32
+                    type: integer
+                  backoffMaxMinutes:
+                    format: int32
+                    type: integer
+                  disableNudge:
+                    description: DisableNudge turns the nudge pass off for this spoke.
+                    type: boolean
+                  disableWatchdog:
+                    description: DisableWatchdog turns the watchdog pass off for this
+                      spoke.
+                    type: boolean
+                  maxMutations:
+                    description: |-
+                      MaxMutations: restart-causing actions (heal, repair, effort fix) per
+                      pass. Each restarts an agent inside the API request, 30-60 s on the
+                      loaded node. Default 3.
+                    format: int32
+                    type: integer
+                  maxSnapshotAgeSeconds:
+                    description: |-
+                      MaxSnapshotAgeSeconds: stall detection is skipped when /api/status's
+                      snapshot is older than this (a frozen snapshot reads as a frozen
+                      pane). Default 900.
+                    format: int32
+                    type: integer
+                  nudgeFloorSeconds:
+                    description: 'NudgeFloorSeconds: never nudge anything idle less
+                      than this. Default 1800.'
+                    format: int32
+                    type: integer
+                  nudgeGrace:
+                    description: |-
+                      NudgeGrace: an agent is overdue when idle longer than Grace × its
+                      LONGEST cadence across all governor modes. Default 2.
+                    format: int32
+                    type: integer
+                  nudgeIntervalMinutes:
+                    description: |-
+                      NudgeIntervalMinutes between nudge passes (the CronJob ran :13,:43).
+                      Default 30.
+                    format: int32
+                    type: integer
+                  nudgeMaxPerSpoke:
+                    description: 'NudgeMaxPerSpoke: successful kicks per pass. Default
+                      4.'
+                    format: int32
+                    type: integer
+                  stallMinutes:
+                    description: |-
+                      StallMinutes: a turn open (busy=working) with a byte-identical pane for
+                      this long is a hang. Default 60.
+                    format: int32
+                    type: integer
+                  watchdogIntervalMinutes:
+                    description: |-
+                      WatchdogIntervalMinutes between watchdog passes (the CronJobs ran */5).
+                      Default 5.
+                    format: int32
+                    type: integer
+                type: object
+              livenessMode:
+                default: Shadow
+                description: |-
+                  LivenessMode controls the watchdog (`hive-rotate.sh watchdog`: pane
+                  classification and healing) and the nudge backstop (`hive-nudge.sh`)
+                  for this spoke, independently of RotationMode. Observe computes
+                  nothing; Shadow records the exact pass in .status.liveness without
+                  acting; Enforce restarts, repairs, fixes efforts and kicks. A rotate-off
+                  (moving an agent off a failing backend) is a placement and is applied
+                  only when RotationMode is ALSO Enforce; otherwise it is reported and the
+                  agent is restarted in place.
+                enum:
+                - Observe
+                - Shadow
+                - Enforce
+                type: string
               namespace:
                 description: Namespace the hive Deployment runs in.
                 type: string
@@ -546,6 +631,188 @@ spec:
                       - backend
                       - model
                       type: object
+                    type: array
+                type: object
+              liveness:
+                description: |-
+                  Liveness is the watchdog's and nudge's last passes, under
+                  spec.livenessMode.
+                properties:
+                  journal:
+                    description: |-
+                      Journal is the watchdog's memory. It is kept in Shadow too, as if
+                      every planned action had succeeded, so the backoff ladder and stall
+                      clocks are already warm (and comparable with bash's) at promotion.
+                    properties:
+                      heals:
+                        description: |-
+                          Heals: per-agent backoff (watchdog-last-kick-<agent>). Cleared the
+                          first time the agent is seen ready.
+                        items:
+                          description: HealRecord is one agent's heal backoff.
+                          properties:
+                            agent:
+                              type: string
+                            count:
+                              format: int32
+                              type: integer
+                            last:
+                              format: date-time
+                              type: string
+                          required:
+                          - agent
+                          - count
+                          - last
+                          type: object
+                        type: array
+                      hygieneAt:
+                        description: 'HygieneAt: the last shared-home permission repair
+                          (hygiene-last).'
+                        format: date-time
+                        type: string
+                      panes:
+                        description: 'Panes: stall clocks (watchdog-pane-<agent>)
+                          for agents mid-turn.'
+                        items:
+                          description: |-
+                            PaneRecord is one agent's stall clock: the pane fingerprint and when it
+                            was first seen unchanged.
+                          properties:
+                            agent:
+                              type: string
+                            hash:
+                              type: string
+                            since:
+                              format: date-time
+                              type: string
+                          required:
+                          - agent
+                          - hash
+                          - since
+                          type: object
+                        type: array
+                      resets:
+                        description: 'Resets: when each exhausted provider renews
+                          (resets.d/<provider>).'
+                        items:
+                          description: ProviderReset is a pending renewal wake-up.
+                          properties:
+                            at:
+                              format: date-time
+                              type: string
+                            provider:
+                              type: string
+                          required:
+                          - at
+                          - provider
+                          type: object
+                        type: array
+                    type: object
+                  nudgeAt:
+                    description: NudgeAt is the last nudge pass.
+                    format: date-time
+                    type: string
+                  nudgePlan:
+                    items:
+                      description: LivenessAction is one auditable watchdog or nudge
+                        action.
+                      properties:
+                        agent:
+                          description: Agent is empty for spoke-wide actions (hygiene,
+                            wake).
+                          type: string
+                        applied:
+                          type: boolean
+                        effort:
+                          type: string
+                        error:
+                          type: string
+                        healCount:
+                          description: HealCount is the restart number this heal records.
+                          format: int32
+                          type: integer
+                        kind:
+                          description: 'Kind: restart, rotate-off, repair, effort,
+                            hygiene, wake, needs-human, kick.'
+                          type: string
+                        reason:
+                          type: string
+                        state:
+                          description: |-
+                            State is the pane classification that triggered a heal: wizard, auth,
+                            approval, shell, empty, stalled.
+                          type: string
+                        toBackend:
+                          type: string
+                        toModel:
+                          type: string
+                      required:
+                      - applied
+                      - kind
+                      - reason
+                      type: object
+                    type: array
+                  nudgePlanText:
+                    description: |-
+                      NudgePlanText is this spoke's share of `hive-nudge.sh` output (Shadow
+                      prints the check-mode suffix " — would nudge").
+                    items:
+                      type: string
+                    type: array
+                  watchdogAt:
+                    description: WatchdogAt is the last watchdog pass.
+                    format: date-time
+                    type: string
+                  watchdogPlan:
+                    description: |-
+                      WatchdogPlan is that pass's actions. In Shadow it is the exact action
+                      set Enforce would take.
+                    items:
+                      description: LivenessAction is one auditable watchdog or nudge
+                        action.
+                      properties:
+                        agent:
+                          description: Agent is empty for spoke-wide actions (hygiene,
+                            wake).
+                          type: string
+                        applied:
+                          type: boolean
+                        effort:
+                          type: string
+                        error:
+                          type: string
+                        healCount:
+                          description: HealCount is the restart number this heal records.
+                          format: int32
+                          type: integer
+                        kind:
+                          description: 'Kind: restart, rotate-off, repair, effort,
+                            hygiene, wake, needs-human, kick.'
+                          type: string
+                        reason:
+                          type: string
+                        state:
+                          description: |-
+                            State is the pane classification that triggered a heal: wizard, auth,
+                            approval, shell, empty, stalled.
+                          type: string
+                        toBackend:
+                          type: string
+                        toModel:
+                          type: string
+                      required:
+                      - applied
+                      - kind
+                      - reason
+                      type: object
+                    type: array
+                  watchdogPlanText:
+                    description: |-
+                      WatchdogPlanText is the pass as `hive-rotate.sh watchdog` prints it
+                      (Shadow shows "restarted (would restart)" where bash shows the hive's
+                      answer), for diffing against the hive-watchdog job log.
+                    items:
+                      type: string
                     type: array
                 type: object
               observedAt:

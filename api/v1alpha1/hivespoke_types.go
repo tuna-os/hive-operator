@@ -127,6 +127,165 @@ type HiveSpokeSpec struct {
 	// PRIMARY spoke scales with provider headroom. Default hive-contributors.
 	// +optional
 	ContributorNamespace string `json:"contributorNamespace,omitempty"`
+
+	// LivenessMode controls the watchdog (`hive-rotate.sh watchdog`: pane
+	// classification and healing) and the nudge backstop (`hive-nudge.sh`)
+	// for this spoke, independently of RotationMode. Observe computes
+	// nothing; Shadow records the exact pass in .status.liveness without
+	// acting; Enforce restarts, repairs, fixes efforts and kicks. A rotate-off
+	// (moving an agent off a failing backend) is a placement and is applied
+	// only when RotationMode is ALSO Enforce; otherwise it is reported and the
+	// agent is restarted in place.
+	// +optional
+	// +kubebuilder:default=Shadow
+	LivenessMode ReconcileMode `json:"livenessMode,omitempty"`
+
+	// Liveness tunes the watchdog and nudge. Every default is the bash one.
+	// +optional
+	Liveness *LivenessPolicySpec `json:"liveness,omitempty"`
+}
+
+// LivenessPolicySpec mirrors the HIVE_WATCHDOG_* and HIVE_NUDGE_* knobs.
+type LivenessPolicySpec struct {
+	// WatchdogIntervalMinutes between watchdog passes (the CronJobs ran */5).
+	// Default 5.
+	// +optional
+	WatchdogIntervalMinutes int32 `json:"watchdogIntervalMinutes,omitempty"`
+	// MaxMutations: restart-causing actions (heal, repair, effort fix) per
+	// pass. Each restarts an agent inside the API request, 30-60 s on the
+	// loaded node. Default 3.
+	// +optional
+	MaxMutations int32 `json:"maxMutations,omitempty"`
+	// BackoffBaseMinutes/BackoffMaxMinutes: per-agent exponential heal
+	// backoff, base, 2×base … capped. Defaults 5 and 120.
+	// +optional
+	BackoffBaseMinutes int32 `json:"backoffBaseMinutes,omitempty"`
+	// +optional
+	BackoffMaxMinutes int32 `json:"backoffMaxMinutes,omitempty"`
+	// StallMinutes: a turn open (busy=working) with a byte-identical pane for
+	// this long is a hang. Default 60.
+	// +optional
+	StallMinutes int32 `json:"stallMinutes,omitempty"`
+	// MaxSnapshotAgeSeconds: stall detection is skipped when /api/status's
+	// snapshot is older than this (a frozen snapshot reads as a frozen
+	// pane). Default 900.
+	// +optional
+	MaxSnapshotAgeSeconds int32 `json:"maxSnapshotAgeSeconds,omitempty"`
+	// DisableWatchdog turns the watchdog pass off for this spoke.
+	// +optional
+	DisableWatchdog bool `json:"disableWatchdog,omitempty"`
+
+	// NudgeIntervalMinutes between nudge passes (the CronJob ran :13,:43).
+	// Default 30.
+	// +optional
+	NudgeIntervalMinutes int32 `json:"nudgeIntervalMinutes,omitempty"`
+	// NudgeGrace: an agent is overdue when idle longer than Grace × its
+	// LONGEST cadence across all governor modes. Default 2.
+	// +optional
+	NudgeGrace int32 `json:"nudgeGrace,omitempty"`
+	// NudgeFloorSeconds: never nudge anything idle less than this. Default 1800.
+	// +optional
+	NudgeFloorSeconds int32 `json:"nudgeFloorSeconds,omitempty"`
+	// NudgeMaxPerSpoke: successful kicks per pass. Default 4.
+	// +optional
+	NudgeMaxPerSpoke int32 `json:"nudgeMaxPerSpoke,omitempty"`
+	// DisableNudge turns the nudge pass off for this spoke.
+	// +optional
+	DisableNudge bool `json:"disableNudge,omitempty"`
+}
+
+// LivenessAction is one auditable watchdog or nudge action.
+type LivenessAction struct {
+	// Agent is empty for spoke-wide actions (hygiene, wake).
+	// +optional
+	Agent string `json:"agent,omitempty"`
+	// Kind: restart, rotate-off, repair, effort, hygiene, wake, needs-human, kick.
+	Kind string `json:"kind"`
+	// State is the pane classification that triggered a heal: wizard, auth,
+	// approval, shell, empty, stalled.
+	// +optional
+	State string `json:"state,omitempty"`
+	// +optional
+	ToBackend string `json:"toBackend,omitempty"`
+	// +optional
+	ToModel string `json:"toModel,omitempty"`
+	// +optional
+	Effort string `json:"effort,omitempty"`
+	// HealCount is the restart number this heal records.
+	// +optional
+	HealCount int32  `json:"healCount,omitempty"`
+	Reason    string `json:"reason"`
+	Applied   bool   `json:"applied"`
+	// +optional
+	Error string `json:"error,omitempty"`
+}
+
+// LivenessStatus is the watchdog's and nudge's last passes and memory.
+type LivenessStatus struct {
+	// WatchdogAt is the last watchdog pass.
+	// +optional
+	WatchdogAt *metav1.Time `json:"watchdogAt,omitempty"`
+	// WatchdogPlan is that pass's actions. In Shadow it is the exact action
+	// set Enforce would take.
+	// +optional
+	WatchdogPlan []LivenessAction `json:"watchdogPlan,omitempty"`
+	// WatchdogPlanText is the pass as `hive-rotate.sh watchdog` prints it
+	// (Shadow shows "restarted (would restart)" where bash shows the hive's
+	// answer), for diffing against the hive-watchdog job log.
+	// +optional
+	WatchdogPlanText []string `json:"watchdogPlanText,omitempty"`
+	// NudgeAt is the last nudge pass.
+	// +optional
+	NudgeAt *metav1.Time `json:"nudgeAt,omitempty"`
+	// +optional
+	NudgePlan []LivenessAction `json:"nudgePlan,omitempty"`
+	// NudgePlanText is this spoke's share of `hive-nudge.sh` output (Shadow
+	// prints the check-mode suffix " — would nudge").
+	// +optional
+	NudgePlanText []string `json:"nudgePlanText,omitempty"`
+	// Journal is the watchdog's memory. It is kept in Shadow too, as if
+	// every planned action had succeeded, so the backoff ladder and stall
+	// clocks are already warm (and comparable with bash's) at promotion.
+	// +optional
+	Journal *LivenessJournal `json:"journal,omitempty"`
+}
+
+// LivenessJournal replaces the watchdog's bash state files.
+type LivenessJournal struct {
+	// Heals: per-agent backoff (watchdog-last-kick-<agent>). Cleared the
+	// first time the agent is seen ready.
+	// +optional
+	Heals []HealRecord `json:"heals,omitempty"`
+	// Panes: stall clocks (watchdog-pane-<agent>) for agents mid-turn.
+	// +optional
+	Panes []PaneRecord `json:"panes,omitempty"`
+	// Resets: when each exhausted provider renews (resets.d/<provider>).
+	// +optional
+	Resets []ProviderReset `json:"resets,omitempty"`
+	// HygieneAt: the last shared-home permission repair (hygiene-last).
+	// +optional
+	HygieneAt *metav1.Time `json:"hygieneAt,omitempty"`
+}
+
+// HealRecord is one agent's heal backoff.
+type HealRecord struct {
+	Agent string      `json:"agent"`
+	Count int32       `json:"count"`
+	Last  metav1.Time `json:"last"`
+}
+
+// PaneRecord is one agent's stall clock: the pane fingerprint and when it
+// was first seen unchanged.
+type PaneRecord struct {
+	Agent string      `json:"agent"`
+	Hash  string      `json:"hash"`
+	Since metav1.Time `json:"since"`
+}
+
+// ProviderReset is a pending renewal wake-up.
+type ProviderReset struct {
+	Provider string      `json:"provider"`
+	At       metav1.Time `json:"at"`
 }
 
 // PaceSpec mirrors hive-pace.sh's HIVE_PACE_* actuation knobs. The verdict
@@ -353,6 +512,11 @@ type HiveSpokeStatus struct {
 	// PaceTickAt is the last pace tick.
 	// +optional
 	PaceTickAt *metav1.Time `json:"paceTickAt,omitempty"`
+
+	// Liveness is the watchdog's and nudge's last passes, under
+	// spec.livenessMode.
+	// +optional
+	Liveness *LivenessStatus `json:"liveness,omitempty"`
 }
 
 // RotationJournal replaces the bash state files.

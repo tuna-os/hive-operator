@@ -32,6 +32,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	hivev1 "github.com/tuna-os/hive-operator/api/v1alpha1"
 )
 
 type spoke struct {
@@ -81,9 +83,36 @@ func main() {
 	opPath := flag.String("operator", "", "Alternatively: a plain file of operator plan lines.")
 	live := flag.Bool("live", false, "Read the live cluster (KUBECONFIG), READ-ONLY: plan every spoke in --sample with the operator's planner and diff against the newest hive-rotate*/hive-pace job logs.")
 	sample := flag.String("sample", "config/samples/fleet.yaml", "With --live: the fleet manifest (spokes' pins/holds, ladder).")
+	liv := flag.Bool("liveness", false, "With --live: diff the watchdog and nudge plans against the newest hive-watchdog*/hive-nudge job logs instead of rotation.")
+	wdBash := flag.String("watchdog-bash", "", "hive-rotate.sh watchdog job log, diffed against --spoke's .status.liveness.watchdogPlanText.")
 	flag.Parse()
+	if *live && *liv {
+		os.Exit(runLivenessLive(*sample))
+	}
 	if *live {
 		os.Exit(runLive(*sample))
+	}
+	if *wdBash != "" {
+		if *spokePath == "" {
+			flag.Usage()
+			os.Exit(2)
+		}
+		bb, err := os.ReadFile(*wdBash)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		sb, err := os.ReadFile(*spokePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		var sp hivev1.HiveSpoke
+		if err := json.Unmarshal(sb, &sp); err != nil {
+			fmt.Fprintln(os.Stderr, "parse spoke:", err)
+			os.Exit(2)
+		}
+		os.Exit(offlineWatchdog(string(bb), sp))
 	}
 	if *bashPath == "" || (*spokePath == "" && *opPath == "") {
 		flag.Usage()
