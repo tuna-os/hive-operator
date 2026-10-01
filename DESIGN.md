@@ -327,9 +327,10 @@ In Enforce the operator owns these journals, in status or a ConfigMap. Until the
 | the probe half of `hive-rotate` (`probe_all`, publishes `hive-provider-usage`) | UsagePool (consumption + learned limit), later hive v5 `/api/providers/headroom` | per pool, `\|reading% − 100×ratio\| ≤ 5` for 7 days (alert above), `Priced=True`, contributor pods covered | flip `rotationUsageSource: UsagePool` per spoke. The probe keeps publishing (calibration) until v5 headroom works; then point `UsagePool.spec.reading` at v5 and delete the bash probe |
 | `hive-watchdog`, `-reef`, `-hanthor` (*/5) | HiveSpoke liveness (`liveness.Watchdog`, `spec.livenessMode`) | `hive-shadow-diff --live --liveness`: 0 `logic` differences for 24 h incl. a real heal | `livenessMode: Enforce` + suspend that spoke's watchdog CronJob ([docs/liveness-promotion.md](docs/liveness-promotion.md)). Rotation first: rotate-offs and renewal wake-ups are placements, applied only under `rotationMode: Enforce` |
 | `hive-pace` (5,25,45) | Pace on UsagePool burn/ETA + `rung_down` | pace verdicts (hot/cold/on-pace) from pools match `hive-pace status` for 7 days | enforce + suspend `hive-pace`; the pacer's journal moves into operator status, and Rotation reads it (closes the pace-demotion inference) |
-| `hive-tiers` (daily) | ModelLadder `benchmarkURL` + bands | `ladder.status.effective` ⊇ `tiers.tsv` rows | suspend `hive-tiers`; point the ladder at the AA feed |
-| `hive-inventory` (daily) | stays (ModelLadder reads its ConfigMap) | — | — |
-| `hive-shared-auth` (*/30) | SharedAuth (already in Shadow) | existing | enforce + suspend, independent of this work |
+| `hive-tiers` (daily) | ModelLadder `benchmarkURL` + bands | `ladder.status.effective` ⊇ `tiers.tsv` rows | owned by `HiveHousekeeping`. No reader is left since school's bash rotate was suspended, so suspend or prune it there ([docs/housekeeping.md](docs/housekeeping.md)) |
+| `hive-inventory` (daily) | stays (ModelLadder reads its ConfigMap), owned by `HiveHousekeeping` | render == live | `HiveHousekeeping` Enforce (adopt) |
+| `hive-shared-auth` (*/30) | SharedAuth (`internal/sharedauth`, rule-for-rule port) | golden job log plus a differential test against the live script; `status.report` vs job log | `HiveHousekeeping` `suspend: true` + SharedAuth Enforce, one change (interlocked) |
+| `hive-pi-kiro`, `-cli-update`, `-repo-sync`, `-metrics`, `-activity` | stay shell, owned by `HiveHousekeeping` | render == live | `HiveHousekeeping` Enforce (adopt) |
 | `hive-nudge` (:13,:43) | HiveSpoke liveness (`liveness.Nudge`, same field) | same diff (nudge section) | narrow `HIVE_NUDGE_NAMESPACES` per promoted spoke; suspend with the last |
 | `hive-peak-pause`/`-resume` | Rotation peak holds, later | — | — |
 

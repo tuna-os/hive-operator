@@ -57,7 +57,9 @@ func (c *Client) Pod(ctx context.Context, ns string) (string, error) {
 		return "", err
 	}
 	for _, p := range pods.Items {
-		if p.Status.Phase == corev1.PodRunning {
+		// hive_pod (hive-lib.sh) skips a terminating pod: under the
+		// Recreate strategy it is the OLD hive, still Running for a while.
+		if p.Status.Phase == corev1.PodRunning && p.DeletionTimestamp == nil {
 			return p.Name, nil
 		}
 	}

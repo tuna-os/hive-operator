@@ -4,14 +4,15 @@ A Kubernetes operator for the tuna-os Hive fleet: the rotation, healing,
 credential-sharing and pacing that currently run as ~12 shell CronJobs, modelled
 as CRDs and controllers, with Prometheus metrics and a fleet dashboard.
 
-**Status: early.** Four controllers exist: `HiveSpoke`, `ModelLadder`,
-`SharedAuth`, and `HiveRelease`. All default to Shadow — `HiveSpoke`'s rotation
-planner runs alongside the legacy CronJobs rather than replacing them. Nothing
-has been cut over yet. Rotation is mid-promotion; see
-[`docs/rotation-promotion.md`](docs/rotation-promotion.md) for the active
-shadow window and the cutover steps. `HiveRelease` takes over the hive image
-version from the suspended `hive-upgrade` CronJob; see
-[`docs/release.md`](docs/release.md).
+**Status.** Six controllers exist: `HiveSpoke`, `ModelLadder`, `SharedAuth`,
+`HiveRelease`, `UsagePool` and `HiveHousekeeping`. Every controller defaults to
+Shadow. Rotation, pacing, the watchdog and the nudge run in Enforce on all three
+spokes, and their bash CronJobs are suspended (see
+[`docs/rotation-promotion.md`](docs/rotation-promotion.md) and
+[`docs/liveness-promotion.md`](docs/liveness-promotion.md)). `HiveRelease` owns
+the hive image version ([`docs/release.md`](docs/release.md)). The remaining
+hive-ops CronJobs are owned by `HiveHousekeeping`, and `hive-shared-auth` is
+replaced by `SharedAuth` ([`docs/housekeeping.md`](docs/housekeeping.md)).
 
 ## Why
 
@@ -36,7 +37,13 @@ point of this project; the controllers are how the numbers stay honest.
 - **`ModelLadder`** — the placement ladder, `rank(benchmark) ∪ builtin`, gated by
   what the backends actually offer.
 - **`SharedAuth`** — one credential store shared across spokes, verified by
-  write-through.
+  write-through. It is `hive-shared-auth.sh` ported rule for rule, diffed
+  against the live script. In Enforce it is interlocked on that CronJob being
+  suspended.
+- **`HiveHousekeeping`** — the hive-ops CronJobs that stay shell (tiers,
+  inventory, pi-kiro, cli-update, repo-sync, metrics, activity), rendered from
+  one spec. Enforce adopts them in place, which keeps their Job history, and
+  reverts drift. It also retires superseded jobs.
 - **`HiveRelease`** — the hive image version: a tag (`v6-latest`) or semver line
   resolved to a digest, rolled canary-first through the spokes with preflight, a
   health gate that restores agent placements reset by the swap, soak, rollback
@@ -174,6 +181,7 @@ kubectl apply -f config/rbac
 kubectl apply -f config/manager
 kubectl apply -f config/samples/fleet.yaml
 kubectl apply -f config/samples/release.yaml   # HiveRelease, Shadow
+kubectl apply -f config/samples/housekeeping.yaml   # HiveHousekeeping, Shadow (docs/housekeeping.md)
 kubectl apply -f config/usage/usagepools.yaml
 ```
 
@@ -195,8 +203,11 @@ See DESIGN.md §7 for how to classify a difference before calling it a bug.
 
 ## Roadmap
 
-1. ~~`SharedAuth` (shadow)~~ — done; promote to Enforce and suspend
-   `hive-shared-auth`.
+1. ~~`SharedAuth` (shadow)~~ — done, now at parity with the live script.
+   Promote it to Enforce and suspend `hive-shared-auth` in one change
+   ([`docs/housekeeping.md`](docs/housekeeping.md) step 3).
+8. ~~Housekeeping~~ — `HiveHousekeeping` owns the remaining hive-ops CronJobs
+   and retires the superseded rotate/watchdog jobs.
 2. ~~`ModelLadder`~~ — done (PR #15): inventory gate, benchmark union, and
    band derivation are implemented. It stays read-only by design — rotation
    consumes `Status.Effective`, `ModelLadder` itself never applies anything.

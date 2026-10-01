@@ -1,0 +1,142 @@
+# The hive-ops CronJobs that stay shell, as operator desired state.
+#
+# Renders byte-for-byte (structurally) the LIVE CronJobs of ns hive
+# (kubectl -n hive get cronjob -o yaml, 2026-10-01T18:00Z): the test
+# TestHousekeepingSampleRendersLive diffs every job against that snapshot
+# (internal/housekeeping/testdata/live-cronjobs-20261001T1800.yaml).
+#
+# Shadow: the controller renders, diffs and reports in
+# `kubectl get hhk fleet -o yaml` → .status.jobs[].{state,drift,action};
+# it writes NOTHING. Enforce adopts each CronJob in place (ownerReference +
+# label, metadata-only — UID and Job history kept) and reverts drift.
+# Cutover: docs/housekeeping.md.
+#
+# Not listed, deliberately (never touched by this object):
+#   hive-rotate, hive-watchdog, hive-pace, hive-nudge — school's promotion,
+#     owned by HiveSpoke rotationMode/livenessMode;
+#   hive-rotate-{reef,hanthor}, hive-watchdog-{reef,hanthor} — suspended,
+#     superseded; see `retire` below (commented until school is promoted);
+#   hive-data-janitor, hive-discord-* — not hive-ops (different image/shape).
+apiVersion: hive.tunaos.org/v1alpha1
+kind: HiveHousekeeping
+metadata:
+  name: fleet
+spec:
+  namespace: hive
+  mode: Shadow
+  scriptsConfigMap: hive-ops-scripts   # observed (hashed), never written
+  template:
+    image: alpine/k8s:1.37.1
+    imagePullPolicy: IfNotPresent
+    serviceAccountName: hive-ops
+    stateClaimName: hive-ops-state
+    labels:
+      app.kubernetes.io/name: hive-ops
+    env:
+      - name: KUBECONFIG              # empty: in-cluster config (hive_kube_env)
+      - name: HIVE_ROTATE_STATE
+        value: /state/hive-rotate
+      - name: HOME
+        value: /tmp
+      - name: KUBECTL_REMOTE_COMMAND_WEBSOCKETS
+        value: "false"
+    resources:
+      requests: {cpu: 25m, memory: 64Mi}
+      limits: {cpu: "1", memory: 512Mi}
+    nodeSelector:
+      workload-role: hive
+    tolerations:
+      - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+    concurrencyPolicy: Forbid
+    startingDeadlineSeconds: 300
+    activeDeadlineSeconds: 600
+    backoffLimit: 0
+    successfulJobsHistoryLimit: 2
+    failedJobsHistoryLimit: 3
+  jobs:
+    # Write-through test + repairs. Suspend IN THE SAME CHANGE as
+    # SharedAuth/fleet → Enforce (the SharedAuth controller refuses to repair
+    # while this is unsuspended).
+    - name: hive-shared-auth
+      schedule: "*/30 * * * *"
+      script: hive-shared-auth.sh
+      args: [reconcile]
+      startingDeadlineSeconds: 600
+      resources:
+        requests: {cpu: 100m, memory: 64Mi}
+        limits: {cpu: "1", memory: 512Mi}
+    # Artificial Analysis agentic index → /state/hive-rotate/tiers.tsv, read
+    # by school's bash hive-rotate. ModelLadder.spec.benchmarkURL already
+    # reads the same feed; retire this with school's hive-rotate.
+    - name: hive-tiers
+      schedule: "50 5 * * *"
+      script: hive-tiers.sh
+      args: [refresh]
+      env:
+        - name: KUBECONFIG
+        - name: HIVE_ROTATE_STATE
+          value: /state/hive-rotate
+        - name: HOME
+          value: /tmp
+        - name: AA_API_KEY
+          valueFrom:
+            secretKeyRef: {name: hive-secrets, key: AA_API_KEY, optional: true}
+        - name: KUBECTL_REMOTE_COMMAND_WEBSOCKETS
+          value: "false"
+    # Per-backend model inventory → ConfigMap hive-model-inventory (read by
+    # ModelLadder's inventory gate).
+    - name: hive-inventory
+      schedule: "40 5 * * *"
+      script: hive-inventory.sh
+      args: [collect]
+      startingDeadlineSeconds: 600
+    # Patched pi-kiro-api checkout on each hive PVC + ~/.pi registration.
+    - name: hive-pi-kiro
+      schedule: "37 * * * *"
+      script: hive-pi-kiro.sh
+      args: [reconcile]
+      startingDeadlineSeconds: 600
+    # Agent CLI updates inside the hive pods.
+    - name: hive-cli-update
+      schedule: "10 5 * * *"
+      script: hive-cli-update.sh
+      args: [update]
+      startingDeadlineSeconds: 600
+    # Governor repo lists ← GitHub App installation.
+    - name: hive-repo-sync
+      schedule: "17 3 * * *"
+      script: hive-repo-sync.sh
+      args: [apply]
+    # 14-day PR/issue series → ConfigMap.
+    - name: hive-metrics
+      schedule: "23 * * * *"
+      script: hive-metrics.sh
+      args: [collect]
+      activeDeadlineSeconds: 2400
+    # Activity feed → ConfigMap hive-hub/hub-front.
+    - name: hive-activity
+      schedule: "*/5 * * * *"
+      script: hive-activity.sh
+      args: [publish]
+      startingDeadlineSeconds: 120
+      env:
+        - name: KUBECONFIG
+        - name: HIVE_ACTIVITY_STATE
+          value: /state/hive-activity
+        - name: HOME
+          value: /tmp
+        - name: KUBECTL_REMOTE_COMMAND_WEBSOCKETS
+          value: "false"
+      resources:
+        requests: {cpu: 100m, memory: 64Mi}
+        limits: {cpu: "1", memory: 512Mi}
+  # Legacy CronJobs to delete (Enforce only; only while suspended with no
+  # active Job). All three spokes run rotation + liveness in Enforce (#45,
+  # #46) and these four are suspended; uncomment to retire them (step 4 of
+  # docs/housekeeping.md). School's hive-rotate/hive-watchdog/hive-pace/
+  # hive-nudge join the list only after school's promotion has soaked.
+  # retire:
+  #   - {name: hive-rotate-hanthor, reason: "HiveSpoke hanthor rotationMode=Enforce"}
+  #   - {name: hive-watchdog-hanthor, reason: "HiveSpoke hanthor livenessMode=Enforce"}
+  #   - {name: hive-rotate-reef, reason: "HiveSpoke reef rotationMode=Enforce"}
+  #   - {name: hive-watchdog-reef, reason: "HiveSpoke reef livenessMode=Enforce"}

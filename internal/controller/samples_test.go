@@ -79,11 +79,14 @@ T3|meta|muse|muse-spark-1.3-contributor`
 		if strings.Join(pins, ",") != e.pin || strings.Join(s.Spec.Holds, ",") != e.hold {
 			t.Errorf("%s: pins %v holds %v, want HIVE_ROTATE_PIN=%q HIVE_ROTATE_HOLD=%q", name, pins, s.Spec.Holds, e.pin, e.hold)
 		}
-		if s.Spec.RotationMode != hivev1.ModeShadow {
-			t.Errorf("%s: rotationMode %s — promotion is a separate, reviewed change", name, s.Spec.RotationMode)
+		// All three spokes were promoted on 2026-10-01 (#45, #46) and their
+		// bash rotate/watchdog/pace/nudge CronJobs suspended. A demotion is a
+		// separate, reviewed change that must unsuspend those jobs with it.
+		if s.Spec.RotationMode != hivev1.ModeEnforce {
+			t.Errorf("%s: rotationMode %s — the spoke is promoted; demoting needs its bash jobs unsuspended in the same change", name, s.Spec.RotationMode)
 		}
-		if s.Spec.LivenessMode != hivev1.ModeShadow {
-			t.Errorf("%s: livenessMode %s — promotion is a separate, reviewed change (docs/liveness-promotion.md)", name, s.Spec.LivenessMode)
+		if s.Spec.LivenessMode != hivev1.ModeEnforce {
+			t.Errorf("%s: livenessMode %s — the spoke is promoted (docs/liveness-promotion.md)", name, s.Spec.LivenessMode)
 		}
 	}
 	if spokes["school"].Spec.Pace.FleetOrder != 0 || spokes["reef"].Spec.Pace.FleetOrder != 1 || spokes["hanthor"].Spec.Pace.FleetOrder != 2 {

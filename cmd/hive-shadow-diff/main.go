@@ -85,7 +85,13 @@ func main() {
 	sample := flag.String("sample", "config/samples/fleet.yaml", "With --live: the fleet manifest (spokes' pins/holds, ladder).")
 	liv := flag.Bool("liveness", false, "With --live: diff the watchdog and nudge plans against the newest hive-watchdog*/hive-nudge job logs instead of rotation.")
 	wdBash := flag.String("watchdog-bash", "", "hive-rotate.sh watchdog job log, diffed against --spoke's .status.liveness.watchdogPlanText.")
+	hk := flag.Bool("housekeeping", false, "With --live: diff the HiveHousekeeping render (--housekeeping-sample) against the live CronJobs, and SharedAuth status.report against the newest hive-shared-auth log.")
+	hkSample := flag.String("housekeeping-sample", "config/samples/housekeeping.yaml", "With --live --housekeeping: the HiveHousekeeping manifest.")
+	sauth := flag.String("sharedauth", "fleet", "With --live --housekeeping: the SharedAuth to compare (\"\" skips).")
 	flag.Parse()
+	if *live && *hk {
+		os.Exit(runHousekeepingLive(*hkSample, *sauth))
+	}
 	if *live && *liv {
 		os.Exit(runLivenessLive(*sample))
 	}
