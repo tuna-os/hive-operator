@@ -105,7 +105,13 @@ func TestProviderOf(t *testing.T) {
 		{"claude", "claude-fable-5-1", "anthropic"},
 		{"agy", "gemini-3.8-flash-low", "google"},
 		{"antigravity", "model_placeholder_m322", "google"},
-		{"goose", "", "deepseek"},
+		{"goose", "", "unknown"}, // DeepSeek dropped 2026-09-24: no default
+		{"pi", "", "unknown"},
+		{"pi", "kiro-api-key/claude-sonnet-5:medium", "kiro"}, // prefix beats the model family
+		{"pi", "kiro-api-key/gpt-5-6-sol:high", "kiro"},
+		{"pi", "kiro/claude-haiku-4-5", "kiro"},
+		{"pi", "[pi] kiro-api-key/claude-opus-5:high", "kiro"},
+		{"muse", "kiro-api-key/claude-opus-5", "meta"}, // CLI first
 		{"bob", "", "ibm"},
 		{"mystery", "", "unknown"},
 	} {

@@ -1,0 +1,19 @@
+usage: from ccleft (generated 2026-10-01T14:58:50Z)
+supervisor     google    pinned by HIVE_ROTATE_PIN — placement left alone
+scanner        meta      muse-spark-1.3-contributor ok
+ci-maintainer  meta      muse-spark-1.3-contributor ok
+quality        meta      muse-spark-1.3-contributor ok
+architect      kiro      kiro-api-key/claude-haiku-4-5:low ok (pace-demoted from kiro-api-key/claude-opus-5:high)
+guide          kiro      kiro-api-key/claude-haiku-4-5:low ok (pace-demoted from kiro-api-key/claude-sonnet-5:medium)
+outreach       kiro      kiro-api-key/claude-haiku-4-5:low ok (pace-demoted from kiro-api-key/claude-sonnet-5:medium)
+sec-check      kiro      kiro-api-key/claude-haiku-4-5:low ok (pace-demoted from kiro-api-key/claude-opus-5:high)
+telemetry      kiro      kiro-api-key/claude-sonnet-5:medium ok
+operations     kiro      kiro-api-key/claude-sonnet-5:medium ok
+strategist     kiro      kiro-api-key/claude-haiku-4-5:low ok (pace-demoted from kiro-api-key/claude-opus-5:high)
+
+contributors:
+agy-contributor          google    ok (replicas=0)
+claude-contributor       anthropic ok (replicas=0)
+pi-codex-contributor     openai    ok (replicas=0)
+
+fleet already on the best available rung

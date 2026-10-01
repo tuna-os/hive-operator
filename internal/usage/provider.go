@@ -9,14 +9,22 @@ import "strings"
 // different mapping would show up as phantom disagreements:
 //
 //  1. by CLI: copilot → github, muse → meta
-//  2. by model: deepseek → deepseek; claude|opus|sonnet|haiku|fable →
+//  2. by pi provider prefix: kiro-api-key/… or kiro/… → kiro. The prefix
+//     names the ACCOUNT billed (the owner's Kiro Power credits), so it wins
+//     over sniffing the model family: kiro-api-key/claude-sonnet-5:medium is
+//     Kiro, not Anthropic.
+//  3. by model: deepseek → deepseek; claude|opus|sonnet|haiku|fable →
 //     anthropic; gpt-|codex → openai; gemini → google
-//  3. by CLI again: claude|litellm → anthropic, codex → openai, agy → google,
-//     bob → ibm, pi|goose → deepseek
+//  4. by CLI again: claude|litellm → anthropic, codex → openai, agy → google,
+//     bob → ibm; anything else (pi and goose included) → unknown
+//
+// pi/goose with no recognisable model used to default to deepseek. The fleet
+// dropped DeepSeek on 2026-09-24, so they are "unknown" now, as in
+// hive-lib.sh. A legacy deepseek-* model still sniffs as deepseek so rotation
+// can see it and move the agent off.
 //
 // ccusage source names are accepted as CLIs too (antigravity ≡ agy), and pi's
-// "[pi] " model prefix is stripped. The model rules win over the CLI because pi
-// and goose front several providers.
+// "[pi] " model prefix is stripped.
 func ProviderOf(cli, model string) string {
 	c := strings.ToLower(strings.TrimSpace(cli))
 	m := strings.ToLower(strings.TrimSpace(model))
@@ -26,6 +34,9 @@ func ProviderOf(cli, model string) string {
 		return "github"
 	case "muse":
 		return "meta"
+	}
+	if strings.HasPrefix(m, "kiro-api-key/") || strings.HasPrefix(m, "kiro/") {
+		return "kiro"
 	}
 	switch {
 	case strings.Contains(m, "deepseek"):
@@ -46,8 +57,6 @@ func ProviderOf(cli, model string) string {
 		return "google"
 	case "bob":
 		return "ibm"
-	case "pi", "goose":
-		return "deepseek"
 	}
 	return "unknown"
 }

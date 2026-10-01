@@ -1,4 +1,14 @@
 # The fleet as it actually runs today. Every controller starts in Shadow.
+#
+# Rotation + pace mirror the LIVE CronJob env (kubectl -n hive get cronjob
+# hive-rotate / hive-rotate-reef / hive-rotate-hanthor / hive-pace -o yaml,
+# 2026-10-01):
+#   hive-rotate          HIVE_ROTATE_PIN=supervisor  HIVE_ROTATE_HOLD=reviewer
+#   hive-rotate-reef     (neither)
+#   hive-rotate-hanthor  HIVE_ROTATE_HOLD=reviewer
+#   hive-pace            HIVE_PACE_PIN=hive/supervisor
+#                        HIVE_PACE_NAMESPACES="hive hive-reef hive-hanthor"
+# Promotion is per spoke: see docs/rotation-promotion.md.
 apiVersion: hive.tunaos.org/v1alpha1
 kind: SharedAuth
 metadata:
@@ -25,11 +35,14 @@ spec:
   rotationMode: Shadow
   budget: {weeklyTokens: 0}      # uncapped
   holds: [reviewer]              # = HIVE_ROTATE_HOLD on the hive-rotate CronJob
+  # HIVE_ROTATE_PIN=supervisor names the AGENT only: rotation leaves its
+  # placement alone (it is still auto-resumed, healed and un-stranded), and
+  # the pacer never re-rules it (HIVE_PACE_PIN=hive/supervisor). It runs
+  # wherever the operator last put it (agy gemini-3.8-flash-medium today).
   pins:
     - agent: supervisor
-      backend: codex
-      model: gpt-5.4-mini
-      reason: "only codex model with no service tier — unmetered, and supervisor is the highest-frequency agent"
+      reason: "HIVE_ROTATE_PIN=supervisor / HIVE_PACE_PIN=hive/supervisor — placement is the operator's, not the ladder's"
+  pace: {fleetOrder: 0}          # HIVE_PACE_NAMESPACES order: hive hive-reef hive-hanthor
 ---
 apiVersion: hive.tunaos.org/v1alpha1
 kind: HiveSpoke
@@ -42,6 +55,7 @@ spec:
   primarySpoke: hive
   ladderRef: fleet
   rotationMode: Shadow
+  pace: {fleetOrder: 1}
 ---
 apiVersion: hive.tunaos.org/v1alpha1
 kind: HiveSpoke
@@ -55,6 +69,7 @@ spec:
   ladderRef: fleet
   rotationMode: Shadow
   holds: [reviewer]              # = HIVE_ROTATE_HOLD on hive-rotate-hanthor
+  pace: {fleetOrder: 2}
   repos: [indiafoss-companion, indiafoss-chat-android, dotfiles, hummingbird-github, reilly.asia, homebrew-tap]
 ---
 apiVersion: hive.tunaos.org/v1alpha1
@@ -67,26 +82,34 @@ spec:
     namespace: hive
     name: hive-model-inventory
     key: inventory.tsv
-  # hive-rotate.sh's built-in TIERS table (lines 191-208), row for row and in
-  # order: Rotation shadows the bash job, so the ladder must be the same
-  # table or every diff line is a ladder difference, not a logic one. The
-  # primary hive's bash job also unions the hive-tiers cache
-  # (/state/hive-rotate/tiers.tsv, Artificial Analysis) in front of these —
-  # see DESIGN.md "ladder parity" before judging T1 diffs on school.
+  # hive-rotate.sh's LIVE built-in TIERS table (ConfigMap hive-ops-scripts,
+  # 2026-10-01), row for row and in order: Rotation shadows the bash job, so
+  # the ladder must be the same table or every diff line is a ladder
+  # difference, not a logic one. DeepSeek is gone (2026-09-24); Kiro (pi +
+  # the kiro-api-key provider) took its place. Every Kiro id carries pi's
+  # `:<thinking>` suffix — load-bearing: v5/v6 rewrites a trailing -<digits>
+  # to .<digits> for every backend but claude/bob, so a bare
+  # kiro-api-key/claude-opus-5 launches as claude-opus.5.
+  #
+  # The primary hive's bash job also unions the hive-tiers cache
+  # (/state/hive-rotate/tiers.tsv: Artificial Analysis rows for anthropic and
+  # openai only) in front of these — see DESIGN.md "ladder parity".
   builtin:
     - {tier: T1, provider: google, backend: agy, model: gemini-3.8-flash-high, effort: high, source: builtin}
-    - {tier: T1, provider: deepseek, backend: pi, model: deepseek-flash, source: builtin}
-    - {tier: T1, provider: openai, backend: codex, model: gpt-5.6-sol, effort: high, source: builtin}
+    - {tier: T1, provider: kiro, backend: pi, model: "kiro-api-key/claude-opus-5:high", source: builtin}
+    - {tier: T1, provider: kiro, backend: pi, model: "kiro-api-key/gpt-5-6-sol:high", source: builtin}
+    - {tier: T1, provider: openai, backend: codex, model: gpt-5.6-sol, source: builtin}
     - {tier: T1, provider: anthropic, backend: claude, model: claude-opus-5, source: builtin}
     - {tier: T2, provider: google, backend: agy, model: gemini-3.8-flash-low, effort: low, source: builtin}
-    - {tier: T2, provider: deepseek, backend: pi, model: deepseek-flash, source: builtin}
-    - {tier: T2, provider: openai, backend: codex, model: gpt-5.6-luna, effort: medium, source: builtin}
+    - {tier: T2, provider: kiro, backend: pi, model: "kiro-api-key/claude-sonnet-5:medium", source: builtin}
+    - {tier: T2, provider: kiro, backend: pi, model: "kiro-api-key/gpt-5-6-luna:medium", source: builtin}
+    - {tier: T2, provider: openai, backend: codex, model: gpt-5.6-luna, source: builtin}
     - {tier: T2, provider: anthropic, backend: claude, model: claude-sonnet-5, source: builtin}
     - {tier: T2, provider: google, backend: agy, model: gemini-3.6-flash-low, effort: low, source: builtin}
     - {tier: T2, provider: meta, backend: muse, model: muse-spark-1.3-contributor, source: builtin}
     - {tier: T3, provider: google, backend: agy, model: gemini-3.8-flash-low, effort: low, source: builtin}
-    - {tier: T3, provider: deepseek, backend: pi, model: deepseek-flash, source: builtin}
-    - {tier: T3, provider: openai, backend: codex, model: gpt-5.6-luna, effort: low, source: builtin}
+    - {tier: T3, provider: kiro, backend: pi, model: "kiro-api-key/claude-haiku-4-5:low", source: builtin}
+    - {tier: T3, provider: openai, backend: codex, model: gpt-5.6-luna, source: builtin}
     - {tier: T3, provider: anthropic, backend: claude, model: claude-haiku-4-5-20251001, source: builtin}
     - {tier: T3, provider: google, backend: agy, model: gemini-3.6-flash-low, effort: low, source: builtin}
     - {tier: T3, provider: meta, backend: muse, model: muse-spark-1.3-contributor, source: builtin}

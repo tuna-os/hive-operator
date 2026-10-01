@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -80,8 +81,16 @@ func (r *ModelLadderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			continue
 		}
 		seen[key] = true
+		// Entitlement gate (hive-rotate.sh tier_members): only muse's
+		// -contributor tiers are ours to run, and muse happily runs the
+		// others (and even invalid ids), so this fails CLOSED.
+		if rung.Backend == "muse" && !strings.HasSuffix(rung.Model, "-contributor") {
+			dropped = append(dropped, fmt.Sprintf("%s/%s: muse model is not a -contributor tier", rung.Provider, rung.Model))
+			continue
+		}
 		available := true
-		if invErr == nil && len(inv[rung.Provider]) > 0 && !inv[rung.Provider][rung.Model] {
+		// A pi `:<thinking>` suffix is launch syntax, not part of the model id.
+		if invErr == nil && len(inv[rung.Provider]) > 0 && !inv[rung.Provider][thinkingRE.ReplaceAllString(rung.Model, "")] {
 			available = false
 			dropped = append(dropped, fmt.Sprintf("%s/%s: absent from live inventory", rung.Provider, rung.Model))
 		}
@@ -110,6 +119,8 @@ func (r *ModelLadderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // rungIdentity keeps the same model available in multiple tiers. Tier is part
 // of placement policy, while effort distinguishes materially different cost
 // and quality choices within a tier.
+var thinkingRE = regexp.MustCompile(`:(off|minimal|low|medium|high|xhigh|max)$`)
+
 func rungIdentity(rung hivev1.Rung) string {
 	return strings.ToLower(strings.Join([]string{rung.Tier, rung.Provider, rung.Model, rung.Effort}, "\x00"))
 }
@@ -122,6 +133,11 @@ func (r *ModelLadderReconciler) inventory(ctx context.Context, ladder *hivev1.Mo
 	var cm corev1.ConfigMap
 	if err := r.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, &cm); err != nil {
 		return nil, err
+	}
+	// A stale inventory fails open, like hive-rotate.sh's
+	// HIVE_INVENTORY_MAX_AGE_DAYS (3): better slightly wrong than empty.
+	if at, err := time.Parse(time.RFC3339, cm.Data["updated_at"]); err == nil && time.Since(at) > 72*time.Hour {
+		return nil, fmt.Errorf("inventory updated_at %s is older than 3 days", cm.Data["updated_at"])
 	}
 	result := map[string]map[string]bool{}
 	for _, line := range strings.Split(cm.Data[ref.Key], "\n") {

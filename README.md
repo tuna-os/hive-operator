@@ -210,4 +210,6 @@ See DESIGN.md §7 for how to classify a difference before calling it a bug.
    [`docs/release.md`](docs/release.md).
 5. `Watchdog` — pane classification and healing.
 6. `Nudge` — the budget-aware kick backstop.
-7. `Pace` — burn-rate pacing.
+7. ~~`Pace`~~ — ported with rotation (branch `rotation/enforce-ready`): the
+   hive-pace fit and the Kiro credit budget run under `rotationMode`; promote
+   per spoke with [`docs/rotation-promotion.md`](docs/rotation-promotion.md).

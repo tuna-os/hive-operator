@@ -5,6 +5,10 @@
 //	kubectl get hivespoke school -o json > spoke.json
 //	hive-shadow-diff --bash bash.log --spoke spoke.json
 //
+// Or, with no operator deployed, against the live cluster (read-only):
+//
+//	KUBECONFIG=~/.kube/config-aws-migration hive-shadow-diff --live
+//
 // Both sides are the plan text in hive-rotate.sh's own format (the operator
 // stores it in .status.rotationPlanText). The comparison is per agent and
 // ignores what only one side can print: the contributors section, footers,
@@ -75,7 +79,12 @@ func main() {
 	bashPath := flag.String("bash", "", "hive-rotate.sh job log (plan or apply output).")
 	spokePath := flag.String("spoke", "", "`kubectl get hivespoke <name> -o json` output.")
 	opPath := flag.String("operator", "", "Alternatively: a plain file of operator plan lines.")
+	live := flag.Bool("live", false, "Read the live cluster (KUBECONFIG), READ-ONLY: plan every spoke in --sample with the operator's planner and diff against the newest hive-rotate*/hive-pace job logs.")
+	sample := flag.String("sample", "config/samples/fleet.yaml", "With --live: the fleet manifest (spokes' pins/holds, ladder).")
 	flag.Parse()
+	if *live {
+		os.Exit(runLive(*sample))
+	}
 	if *bashPath == "" || (*spokePath == "" && *opPath == "") {
 		flag.Usage()
 		os.Exit(2)

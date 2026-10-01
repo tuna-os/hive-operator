@@ -97,8 +97,11 @@ type UsagePoolSpec struct {
 	// +optional
 	// +kubebuilder:validation:Enum=costUSD;tokens;outputTokens
 	Unit string `json:"unit,omitempty"`
-	// Windows are the provider's quota windows.
-	Windows []UsageWindowSpec `json:"windows"`
+	// Windows are the provider's quota windows. Optional: a pool with none
+	// still publishes its rotation reading and pace verdict (meta has no
+	// quota windows at all).
+	// +optional
+	Windows []UsageWindowSpec `json:"windows,omitempty"`
 	// Reading is the provider-reported "% used" used for calibration and,
 	// while it exists, as the authoritative UsedPercent. Transitional: today
 	// it is the bash probe's ConfigMap; see DESIGN.md for retiring it.
@@ -110,6 +113,10 @@ type UsagePoolSpec struct {
 	// for this account, or has no matching window.
 	// +optional
 	Ccleft *CcleftRef `json:"ccleft,omitempty"`
+	// Pace tunes the burn-rate verdict computed from the pool's reading
+	// history (hive-pace.sh's fit, and the Kiro credit budget).
+	// +optional
+	Pace *PoolPaceSpec `json:"pace,omitempty"`
 	// SidecarPort is where hive-usage listens in each hive pod. Default 9464.
 	// +optional
 	SidecarPort int32 `json:"sidecarPort,omitempty"`
@@ -118,6 +125,140 @@ type UsagePoolSpec struct {
 	// +optional
 	// +kubebuilder:default=Observe
 	Mode ReconcileMode `json:"mode,omitempty"`
+}
+
+// PoolPaceSpec mirrors hive-pace.sh's verdict knobs. Decimals are strings.
+type PoolPaceSpec struct {
+	// Deadband around 1.0 that counts as on-pace. Default "0.25".
+	// +optional
+	Deadband string `json:"deadband,omitempty"`
+	// MinSamples before any verdict. Default 3.
+	// +optional
+	MinSamples int32 `json:"minSamples,omitempty"`
+	// MinSpanSeconds the samples must span. Default 3600.
+	// +optional
+	MinSpanSeconds int32 `json:"minSpanSeconds,omitempty"`
+	// SampleIntervalSeconds: keep at most one sample per this interval
+	// (hive-pace sampled each 20-minute tick; Kiro also took every reading
+	// rotate/watchdog saw). Default 1200; 0 for the kiro pool.
+	// +optional
+	SampleIntervalSeconds *int32 `json:"sampleIntervalSeconds,omitempty"`
+	// HistoryHours of samples kept. Default 60 (≈ hive-pace's 1200 lines).
+	// +optional
+	HistoryHours int32 `json:"historyHours,omitempty"`
+	// Kiro credit budget (kiro pool only): allowed = remaining/hours × Safety.
+	// +optional
+	KiroSafety string `json:"kiroSafety,omitempty"`
+	// +optional
+	KiroHot string `json:"kiroHot,omitempty"`
+	// +optional
+	KiroCold string `json:"kiroCold,omitempty"`
+	// +optional
+	KiroWindowSeconds int32 `json:"kiroWindowSeconds,omitempty"`
+	// +optional
+	KiroMinSamples int32 `json:"kiroMinSamples,omitempty"`
+	// +optional
+	KiroMinSpanSeconds int32 `json:"kiroMinSpanSeconds,omitempty"`
+	// +optional
+	KiroMaxReadingAgeSeconds int32 `json:"kiroMaxReadingAgeSeconds,omitempty"`
+}
+
+// PoolRotationReading is the pool's reading in hive-rotate.sh's probe shape.
+type PoolRotationReading struct {
+	// Percent 0-100, or -1 UNMEASURED (never exhausted).
+	Percent int32 `json:"percent"`
+	// Note is the probe note (resets=…, no-usage-api (…), credits=U/L …).
+	// +optional
+	Note string `json:"note,omitempty"`
+	// Source: ccleft, configmap or none.
+	Source string `json:"source"`
+	// MeasuredAt: ccleft's fetched_at, or the ConfigMap's updated_at.
+	// +optional
+	MeasuredAt *metav1.Time `json:"measuredAt,omitempty"`
+	// ComputedAt: when this controller derived it.
+	// +optional
+	ComputedAt *metav1.Time `json:"computedAt,omitempty"`
+}
+
+// PaceSlotStatus is one limit's fit. Decimals are strings ("" = null).
+type PaceSlotStatus struct {
+	Slot string `json:"slot"`
+	Pct  string `json:"pct"`
+	// +optional
+	Reset   int64 `json:"reset,omitempty"`
+	Samples int32 `json:"samples"`
+	// +optional
+	SpanSeconds int64 `json:"spanSeconds,omitempty"`
+	// +optional
+	HoursLeft string `json:"hoursLeft,omitempty"`
+	// +optional
+	AllowedRate string `json:"allowedRate,omitempty"`
+	// +optional
+	ObservedRate string `json:"observedRate,omitempty"`
+	// +optional
+	Ratio string `json:"ratio,omitempty"`
+}
+
+// KiroBudgetStatus is the Kiro credit budget verdict. Decimals are strings.
+type KiroBudgetStatus struct {
+	// Verdict: over, under, on-budget, settling, learning, stale,
+	// no-deadline, no-data.
+	Verdict string `json:"verdict"`
+	// +optional
+	Used string `json:"used,omitempty"`
+	// +optional
+	Limit string `json:"limit,omitempty"`
+	// +optional
+	Remaining string `json:"remaining,omitempty"`
+	// +optional
+	Reset int64 `json:"reset,omitempty"`
+	// +optional
+	ReadingAgeSeconds int64 `json:"readingAgeSeconds,omitempty"`
+	// +optional
+	Safety string `json:"safety,omitempty"`
+	// +optional
+	HoursLeft string `json:"hoursLeft,omitempty"`
+	// +optional
+	Allowed string `json:"allowed,omitempty"`
+	// +optional
+	Burn string `json:"burn,omitempty"`
+	// +optional
+	Burn6h string `json:"burn6h,omitempty"`
+	// +optional
+	Ratio string `json:"ratio,omitempty"`
+	// +optional
+	Samples int32 `json:"samples,omitempty"`
+	// +optional
+	SpanSeconds int64 `json:"spanSeconds,omitempty"`
+	// +optional
+	WindowStart int64 `json:"windowStart,omitempty"`
+	// Line is the verdict as hive-pace prints it.
+	// +optional
+	Line string `json:"line,omitempty"`
+}
+
+// PoolPaceStatus is the pool's pace verdict (hive-pace's pace.json entry).
+type PoolPaceStatus struct {
+	// Verdict: hot, cold, on-pace, learning.
+	Verdict string `json:"verdict"`
+	// +optional
+	Pressure string `json:"pressure,omitempty"`
+	// +optional
+	BindingSlot string `json:"bindingSlot,omitempty"`
+	// +optional
+	Slots []PaceSlotStatus `json:"slots,omitempty"`
+	// Row is the provider's line of hive-pace's verdict table.
+	// +optional
+	Row string `json:"row,omitempty"`
+	// +optional
+	KiroBudget *KiroBudgetStatus `json:"kiroBudget,omitempty"`
+	// LastActuation: the last pace notch on this provider, fleet-wide (one
+	// notch per provider per tick across every Enforce spoke; for kiro,
+	// KIRO_LAST_ACT — the budget never fits across it).
+	// +optional
+	LastActuation *metav1.Time `json:"lastActuation,omitempty"`
+	// +optional
+	ComputedAt *metav1.Time `json:"computedAt,omitempty"`
 }
 
 // UsageWindowStatus is one evaluated window. Numbers are decimal strings in
@@ -256,6 +397,17 @@ type UsagePoolStatus struct {
 	// Account is the provider account behind the pool, from ccleft.
 	// +optional
 	Account *ProviderAccountStatus `json:"account,omitempty"`
+	// RotationReading is what rotation plans from (HiveSpoke
+	// rotationUsageSource UsagePool): ccleft first, the ConfigMap fallback.
+	// +optional
+	RotationReading *PoolRotationReading `json:"rotationReading,omitempty"`
+	// PaceHistory is the pacer's sample history, oldest first, one sample
+	// per line: "<ts> <slot> <pct> <reset|-> [<used> <limit>]".
+	// +optional
+	PaceHistory []string `json:"paceHistory,omitempty"`
+	// Pace is the burn-rate verdict over PaceHistory.
+	// +optional
+	Pace *PoolPaceStatus `json:"pace,omitempty"`
 }
 
 // +kubebuilder:object:root=true

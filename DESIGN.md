@@ -1,6 +1,31 @@
 # Usage pools and rotation: replacing the bash ops scripts
 
-**Status:** Phase 1 (Observe) and the Phase 2 skeleton (Rotation in Shadow) are implemented on branch `usage-ccusage`. Nothing here mutates a hive.
+**Status (2026-10-01, branch `rotation/enforce-ready`):** rotation and pacing are ported to rule parity with the LIVE bash (ConfigMap `hive/hive-ops-scripts`, which is ahead of dotfiles git: `hive-rotate.sh` 1922 lines, `hive-pace.sh` 863, `hive-lib.sh` 668) and can be promoted to Enforce per spoke — see [docs/rotation-promotion.md](docs/rotation-promotion.md). Every spoke still runs Shadow. Sections 1–4 below are the Phase 0/1 record; §0 is what changed since.
+
+## 0. Since Phase 1 (2026-10-01)
+
+**The bash moved on.** DeepSeek is gone (2026-09-24); Kiro (the owner's Kiro Power plan, 10000 credits/month, overage disabled, reached through `pi` with `kiro-api-key/<model>:<thinking>` ids) replaced it. ccleft is the only quota poller (`HIVE_PROBE_SOURCE=ccleft`); the ConfigMap is a fallback. hive-pace grew a Kiro credit budget. The planner was re-ported from those scripts, not from this document:
+
+| rule (bash) | where |
+|---|---|
+| `hive_provider_of`: CLI (copilot/muse) → `kiro-api-key/`·`kiro/` prefix → model sniff → CLI; pi/goose → unknown | `usage.ProviderOf` |
+| `ccleft_probe` / `ccleft_anthropic_limits` / `ccleft_kiro_sample` (notes byte for byte; stale ≤ 1800 s, fresh ≤ 3600 s) | `usage.CcleftProbe` & co. |
+| TIERS (Kiro rungs, muse last in T2), AGENT_TIERS, muse `-contributor` gate, inventory gate ignoring pi `:<thinking>`, stale inventory fails open | `config/samples/fleet.yaml`, `ModelLadder` |
+| thresholds openai 85 / anthropic 90 / google 90 / kiro 95 / other 85; −1 never exhausted, never recovered | `rotation.Policy` |
+| cost rank google 0 < kiro 1 < anthropic 2 < openai 3; +5 per placement; alphabetical tie-break (sort QUIRK) | `chooseRung` |
+| stickiness (failover, not optimiser) incl. multi-notch pace demotion (`rung_chain`) | `Compute` step 3 |
+| codex bar for ≤ 30 m agents unless current provider exhausted; agy ≤ 5 high-volume; Kiro cadence guard (< 900 s never placed on, nor sticky on, kiro unless current provider exhausted) | `providerOK` |
+| hive-pace Kiro cap requests (`kiro-evict`): move off Kiro onto the named pools, own tier only | `Compute` step 3 |
+| strand + journal (only if not already paused), un-strand on recovery, undeclared-pause auto-resume with holds / peak holds, recovery net, resume after a move of a login-detector/stranded agent | `Compute` steps 1–3 |
+| canary: openai only, not while ccleft measures codex, 720 m cooldown after leaving an exhausted pool | `Compute` step 4 |
+| contributor replicas (primary only) | `rotation.Contributors` |
+| hive-pace: least-squares fit, pressure = max(observed/allowed), deadband 0.25, ≥ 3 samples over ≥ 1 h, rollover cut; hot → demote one agent one notch per provider per tick; cold → restore only own demotions; SATURATED | `rotation.Fit`, `PlanPace` |
+| Kiro budget: burn over the last hour never across the last actuation, allowed = remaining/hours × 0.85, over → demote by savings (≤ 4) else cap requests (≤ 2) onto agy/claude below 85 % and not hot, else SATURATED; under → withdraw caps, promote one (projected ≤ 0.8) | `ComputeKiroBudget`, `planKiro` |
+| placement = ONE atomic `PUT /api/config/agent/{name}/models` (+ agy effort), `hive_placement_ok` | `rotation.HiveActuator` + `hiveclient.Place` (X-Hive-Internal) |
+
+**Where state lives now.** The bash journals become status: `HiveSpoke.status.journal` (stranded, paceDemoted, kiroEvict, canaryCooldown — written only in Enforce, seeded from inference at promotion); `UsagePool.status.rotationReading` (the probe line rotation reads), `.status.paceHistory` (samples, ccleft fetch time, ≤ 60 h, ≥ 20 min apart except Kiro), `.status.pace` (verdict, Kiro budget, `lastActuation` = the fleet-wide one-notch-per-provider marker and KIRO_LAST_ACT).
+
+**Golden tests** reproduce the live job logs of 2026-10-01 byte for byte: hive-rotate school (14:20, 15:00), hanthor (14:14), reef (14:27) incl. the contributors section, and hive-pace 14:25 (google hot, nothing demotable) and 14:45 (Kiro over budget → two `kiro-demote`s chosen by savings with bash sort's tie-break). `go run ./cmd/hive-shadow-diff --live` re-runs the comparison read-only against the cluster.
 
 **Goal:** move the provider-usage measurement, rotation and pacing now done by `hive-rotate.sh`, `hive-pace.sh` and `hive-tiers.sh` into the operator. We measure consumption with [ccusage](https://github.com/ccusage/ccusage) instead of scraping each CLI's TUI, and extend ccusage upstream where it falls short (`docs/upstream-ccusage.md`).
 
@@ -286,9 +311,7 @@ The planner therefore:
 
 In Enforce the operator owns these journals, in status or a ConfigMap. Until then they are a *known* diff class (§7).
 
-**Actuation.** `rotation.Actuator` / `HiveActuator` implements the bash call sequence: switch → model → effort, backend rollback on model failure, pause for strands, resume. It is tested against a fake API.
-
-**It is not wired.** `cmd/main.go` passes no Actuator. A spoke set to `Enforce` plans as Shadow and says so in condition `RotationEnforced=False, reason NoActuator`. (The earlier Enforce path, which also kicked, has been removed.)
+**Actuation (superseded, see §0).** `HiveActuator` now places with the atomic models PUT through `hiveclient.Place` and the X-Hive-Internal token; it is bound per reconcile to the spoke's pod, and applies only when the spoke's `rotationMode` is Enforce, at most once per rotation interval (20 min).
 
 **ModelLadder.** Unchanged here. The next step is pace: the pacer's demotion ladder (`rung_down`) plus the pool's `burnPerHour`, `remaining` and `exhaustionETA` replace hive-pace's least-squares fit on scraped percentages. hive-pace's verdict is `pressure = observed_rate / allowed_rate`, where `allowed_rate = (100 − pct) / hours_left`. The pool gives `burn / (remaining / hours_to_reset)` directly, per agent.
 
@@ -310,7 +333,7 @@ In Enforce the operator owns these journals, in status or a ConfigMap. Until the
 | `hive-nudge` | Nudge (roadmap 5) | — | — |
 | `hive-peak-pause`/`-resume` | Rotation peak holds, later | — | — |
 
-**The Enforce step itself is out of scope for this branch.** It needs its own review.
+**The Enforce step** is per spoke, rotate and pace together: [docs/rotation-promotion.md](docs/rotation-promotion.md).
 
 ---
 
@@ -343,4 +366,5 @@ In Enforce the operator owns these journals, in status or a ConfigMap. Until the
 - **Antigravity cost.** ~0.5 CPU-s per DB. At 500 DBs and a 500m limit, one pass takes ~6 min. A 15-min cadence is fine; the upstream fix is draft #2.
 - **Back-filled windows are approximate** until one full window of measured deltas has accumulated after a (re)start. `primed` and back-fill are visible in status.
 - **Read-only SQLite on a live WAL.** It worked on read-only copies with existing `-wal`/`-shm`. Verify on rollout via `hive_usage_collect_success{source="antigravity"}`.
-- **Rotation's Enforce is intentionally unwired.** The earlier kick-after-place behaviour was dropped to match bash.
+- **Rotation's Enforce is wired but no spoke uses it yet.** The earlier kick-after-place behaviour was dropped to match bash.
+- **The watchdog is not ported.** `hive-watchdog-<spoke>` keeps running after promotion; its renewal wake-up re-runs a bash rotate apply (see the promotion doc's caveats).

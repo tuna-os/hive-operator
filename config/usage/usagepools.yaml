@@ -1,5 +1,10 @@
-# One UsagePool per provider ACCOUNT. Observe-only: they measure; rotation
-# reads them only when a HiveSpoke sets rotationUsageSource: UsagePool.
+# One UsagePool per provider ACCOUNT. Observe-only: they measure and publish
+# rotation's reading (status.rotationReading: ccleft reduced exactly as
+# hive-lib.sh's ccleft_probe, the ConfigMap as fallback) and the pacer's
+# verdict (status.pace). The pools rotation reads are hive-rotate.sh's
+# PROVIDERS: kiro anthropic openai google meta. The hive-usage (ccusage)
+# sidecar is OPTIONAL — without it the windows' consumption stays 0 and
+# Ready=False/NoSidecar, but rotationReading and pace are unaffected.
 #
 # Limits are left empty (learned): consumption is calibrated against the
 # provider reading. Readings come from ccleft (hive/ccleft, the provider's own
@@ -52,14 +57,13 @@ spec:
 apiVersion: hive.tunaos.org/v1alpha1
 kind: UsagePool
 metadata:
-  name: deepseek
+  name: meta
 spec:
-  provider: deepseek
-  unit: costUSD
-  # DeepSeek is prepaid balance, not a window: the reading is 0% or 100%.
-  # The daily window here is for burn rate and per-agent attribution only.
-  windows:
-    - {name: daily, duration: 24h, ccleftWindow: "balance:usd"}
+  # muse (Meta) has no quota API: ccleft reports `unsupported`, which
+  # rotation reads as "-1 no-usage-api" (unmeasured, entry allowed) exactly
+  # like hive-rotate.sh. No windows and no ccusage source: the pool exists so
+  # rotation's meta reading comes from ccleft like every other provider's.
+  provider: meta
   reading: {namespace: hive, name: hive-provider-usage}
   ccleft: {url: http://ccleft.hive.svc:9464}
 ---
@@ -77,3 +81,14 @@ spec:
     - {name: monthly, duration: 744h, ccleftWindow: plan}
   reading: {namespace: hive, name: hive-provider-usage}
   ccleft: {url: http://ccleft.hive.svc:9464}
+  # The Kiro credit budget (hive-pace HIVE_PACE_KIRO_* on the live CronJob):
+  # every ccleft fetch is a sample (sampleIntervalSeconds 0), burn fitted over
+  # the last hour, allowed = remaining / hours-to-reset x 0.85.
+  pace:
+    sampleIntervalSeconds: 0
+    kiroSafety: "0.85"
+    kiroHot: "1.0"
+    kiroCold: "0.6"
+    kiroWindowSeconds: 3600
+    kiroMinSamples: 3
+    kiroMinSpanSeconds: 1200

@@ -1,0 +1,7 @@
+{
+  "controls": "41 agents in: hive hive-reef hive-hanthor",
+  "kiro-budget.json": "{\"allowed\": 11.1, \"burn\": 7.5, \"burn_6h\": 32.6, \"hours_left\": 729.58, \"limit\": 10000.0, \"ratio\": 0.68, \"reading_age_s\": 70, \"remaining\": 9541.15, \"reset\": 1793491200, \"safety\": 0.85, \"samples\": 12, \"span_s\": 3301, \"used\": 458.85, \"verdict\": \"on-budget\", \"window_start\": 1790861100}",
+  "pace.json": "{\"anthropic\": {\"pressure\": null, \"slots\": {\"slot0\": {\"allowed_rate\": null, \"hours_left\": null, \"observed_rate\": 0.0, \"pct\": 100, \"reset\": null, \"samples\": 230, \"span_s\": 274867}}, \"verdict\": \"learning\"}, \"google\": {\"binding_slot\": \"slot0\", \"pressure\": 47.88, \"slots\": {\"slot0\": {\"allowed_rate\": 0.04, \"exhausts_in_h\": 2.61, \"hours_left\": 132.87, \"observed_rate\": 1.92, \"pct\": 95, \"ratio\": 47.88, \"reset\": 1791343028, \"samples\": 31, \"span_s\": 35950}}, \"verdict\": \"hot\"}, \"kiro\": {\"binding_slot\": \"slot0\", \"pressure\": 3.01, \"slots\": {\"slot0\": {\"allowed_rate\": 0.13, \"exhausts_in_h\": 243.62, \"hours_left\": 729.58, \"observed_rate\": 0.39, \"pct\": 4.589, \"ratio\": 3.01, \"reset\": 1793491200, \"samples\": 147, \"span_s\": 51551}}, \"verdict\": \"hot\"}, \"openai\": {\"pressure\": null, \"slots\": {\"slot0\": {\"allowed_rate\": 0.0, \"hours_left\": 56.28, \"observed_rate\": 0.0, \"pct\": 100, \"reset\": 1791067304, \"samples\": 231, \"span_s\": 276068}}, \"verdict\": \"learning\"}}",
+  "source": "ccleft",
+  "updated_at": "2026-10-01T14:25:01Z"
+}

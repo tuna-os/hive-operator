@@ -1,0 +1,14 @@
+PROVIDER    VERDICT   PRESSURE  OBSERVED    ALLOWED     DETAIL
+anthropic   learning  -         0.0 %/hr    -           100% used, ?h left, 1 limit(s), 230 sample(s)
+google      hot       47.88     1.92 %/hr   0.04 %/hr   95% used, 132.87h left, 1 limit(s), 31 sample(s)
+openai      learning  -         0.0 %/hr    0.0 %/hr    100% used, 56.28h left, 1 limit(s), 231 sample(s)
+kiro        hot       3.01      0.39 %/hr   0.13 %/hr   4.589% used, 729.58h left, 1 limit(s), 147 sample(s)
+
+controls 41 agents across: hive hive-reef hive-hanthor
+NOTE: contributor CLIs draw on the same pools and are NOT actuated here.
+readings: ccleft
+
+kiro budget: on-budget — used 458.85/10000.0 cr, 9541.15 left, 729.58h to reset -> allowed 11.1 cr/h (safety 0.85); burn 7.5 cr/h over 12 sample(s)/55m (6h: 32.6) -> ratio 0.68
+  SATURATED: google is hot but no notch was available (0 of 1 seated agents demotable) — model-rung pacing is exhausted; needs cadence or capacity
+
+pace: 0 change(s)

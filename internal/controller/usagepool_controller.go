@@ -160,10 +160,17 @@ func (r *UsagePoolReconciler) readings(ctx context.Context, pool *hivev1.UsagePo
 // records what it saw in status.account either way; a nil reading plus a
 // note means "fall back to the ConfigMap".
 func (r *UsagePoolReconciler) ccleftReading(ctx context.Context, pool *hivev1.UsagePool, now time.Time) (*ccleft.Reading, string) {
+	rd, _, note := r.ccleftFetch(ctx, pool, now)
+	return rd, note
+}
+
+// ccleftFetch is ccleftReading plus the whole /readings document (nil when
+// ccleft could not be read), which the rotation reading needs.
+func (r *UsagePoolReconciler) ccleftFetch(ctx context.Context, pool *hivev1.UsagePool, now time.Time) (*ccleft.Reading, *usage.CcleftOutput, string) {
 	ref := pool.Spec.Ccleft
 	if ref == nil {
 		pool.Status.Account = nil
-		return nil, ""
+		return nil, nil, ""
 	}
 	prov := ccleft.Provider(ref.Provider)
 	if prov == "" {
@@ -178,12 +185,12 @@ func (r *UsagePoolReconciler) ccleftReading(ctx context.Context, pool *hivev1.Us
 	out, err := f.Readings(ctx, ref.URL)
 	if err != nil {
 		acct.Error = "ccleft unavailable: " + err.Error()
-		return nil, acct.Error
+		return nil, nil, acct.Error
 	}
 	rd, err := usage.SelectCcleftReading(out, prov, ref.Account)
 	if err != nil {
 		acct.Error = err.Error()
-		return nil, acct.Error
+		return nil, out, acct.Error
 	}
 	acct.Account, acct.State, acct.Cause, acct.Plan = rd.Account, string(rd.State), rd.Cause, rd.Plan
 	acct.Stale, acct.FetchedAt, acct.Homes = rd.Stale, metaTime(rd.FetchedAt), rd.Homes
@@ -196,10 +203,73 @@ func (r *UsagePoolReconciler) ccleftReading(ctx context.Context, pool *hivev1.Us
 	}
 	if err := usage.CcleftUsable(rd, now, maxAge); err != nil {
 		acct.Error = err.Error()
-		return nil, acct.Error
+		return nil, out, acct.Error
 	}
 	acct.Source = "ccleft"
-	return &rd, ""
+	return &rd, out, ""
+}
+
+// rotationReading reduces the pool to hive-rotate.sh's probe line: ccleft's
+// /readings through ccleft_probe when ccleft answered, else the ConfigMap
+// value when it is fresh, else unmeasured. It also returns the pace samples
+// that reading yields (hive-pace record / ccleft_kiro_sample).
+func rotationReading(pool *hivev1.UsagePool, out *usage.CcleftOutput, cm map[string]string, cmAt time.Time, cmFresh bool, now time.Time) (*hivev1.PoolRotationReading, []usage.PaceSample) {
+	p := pool.Spec.Provider
+	rr := &hivev1.PoolRotationReading{Percent: -1, Source: "none", ComputedAt: metaTime(now)}
+	var samples []usage.PaceSample
+	if out != nil {
+		l := usage.CcleftProbe(out, p, now, 0, 0)
+		rr.Percent, rr.Note, rr.Source = int32(l.Percent), l.Note, "ccleft"
+		at, ok := usage.MeasuredAt(out, p)
+		if ok {
+			rr.MeasuredAt = metaTime(at)
+		}
+		ts := now.Unix()
+		if ok {
+			ts = at.Unix()
+		}
+		switch p {
+		case "kiro":
+			if s, ok := usage.CcleftKiroSample(out, now, 0, 0); ok {
+				samples = append(samples, s)
+			} else if s, ok := usage.SampleFromLine(p, l, ts); ok {
+				samples = append(samples, s)
+			}
+		case "anthropic":
+			if lim := usage.CcleftAnthropicLimits(out, now, 0, 0); len(lim) > 0 {
+				for _, s := range lim {
+					samples = append(samples, usage.PaceSample{TS: ts, Provider: p, Slot: s.Slot, Pct: float64(s.Percent), Reset: s.ResetsAt.Unix()})
+				}
+			} else if s, ok := usage.SampleFromLine(p, l, ts); ok {
+				samples = append(samples, s)
+			}
+		default:
+			if s, ok := usage.SampleFromLine(p, l, ts); ok {
+				samples = append(samples, s)
+			}
+		}
+		return rr, samples
+	}
+	if cmFresh {
+		key := p
+		if pool.Spec.Reading != nil && pool.Spec.Reading.Key != "" {
+			key = pool.Spec.Reading.Key
+		}
+		v, ok := cm[key]
+		if !ok {
+			v = "unknown unpublished"
+		}
+		l := usage.PublishedToProbe(v)
+		rr.Percent, rr.Note, rr.Source, rr.MeasuredAt = int32(l.Percent), l.Note, "configmap", metaTime(cmAt)
+		// Stamped with the publication time, not now: the pool reconciles
+		// every 2 minutes and one publication must stay one sample.
+		if s, ok := usage.SampleFromLine(p, l, cmAt.Unix()); ok {
+			samples = append(samples, s)
+		}
+		return rr, samples
+	}
+	rr.Note = "unmeasured (ccleft and the ConfigMap both unavailable)"
+	return rr, nil
 }
 
 func providerWindowStatus(w ccleft.Window) *hivev1.ProviderWindowStatus {
@@ -245,7 +315,8 @@ func (r *UsagePoolReconciler) evaluate(ctx context.Context, pool *hivev1.UsagePo
 		return err
 	}
 	probe, readingAt, readingNote := r.readings(ctx, pool, now)
-	cc, ccNote := r.ccleftReading(ctx, pool, now)
+	cc, ccOut, ccNote := r.ccleftFetch(ctx, pool, now)
+	r.paceReading(ctx, pool, ccOut, readingNote == "", readingAt, now)
 	scope := ""
 	if pool.Spec.Ccleft != nil {
 		scope = pool.Spec.Ccleft.Scope
@@ -482,6 +553,24 @@ func (r *UsagePoolReconciler) evaluate(ctx context.Context, pool *hivev1.UsagePo
 			Reason: "AllPriced", Message: "every model consumed is priced", ObservedGeneration: pool.Generation})
 	}
 	return nil
+}
+
+// paceReading fills status.rotationReading, records pace samples and
+// recomputes the pace verdict.
+func (r *UsagePoolReconciler) paceReading(ctx context.Context, pool *hivev1.UsagePool, out *usage.CcleftOutput, cmFresh bool, cmAt time.Time, now time.Time) {
+	var cm map[string]string
+	if ref := pool.Spec.Reading; ref != nil && cmFresh {
+		var c corev1.ConfigMap
+		if err := r.Get(ctx, client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}, &c); err == nil {
+			cm = c.Data
+		} else {
+			cmFresh = false
+		}
+	}
+	rr, samples := rotationReading(pool, out, cm, cmAt, cmFresh && pool.Spec.Reading != nil, now)
+	pool.Status.RotationReading = rr
+	recordSamples(pool, samples, now)
+	computePace(pool, now)
 }
 
 // SetupWithManager wires the controller.

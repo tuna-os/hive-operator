@@ -13,12 +13,16 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 type AgentPin struct {
 	// Agent is the agent name, e.g. "supervisor".
 	Agent string `json:"agent"`
-	// Backend is the CLI that runs it: claude, codex, agy, pi.
-	Backend string `json:"backend"`
+	// Backend is the CLI that runs it: claude, codex, agy, pi. Optional:
+	// rotation only needs to know the agent is pinned (HIVE_ROTATE_PIN names
+	// agents, not placements); Backend/Model document the intended pair.
+	// +optional
+	Backend string `json:"backend,omitempty"`
 	// Model is the exact id the backend accepts. It need NOT be on the ladder —
 	// pinning supervisor to gpt-5.4-mini (the only codex model with no service
 	// tier, and so unmetered) is the motivating case.
-	Model string `json:"model"`
+	// +optional
+	Model string `json:"model,omitempty"`
 	// Reason is free text, surfaced in the dashboard and in events.
 	// +optional
 	Reason string `json:"reason,omitempty"`
@@ -94,11 +98,13 @@ type HiveSpokeSpec struct {
 	RotationMode ReconcileMode `json:"rotationMode,omitempty"`
 
 	// RotationUsageSource selects the provider readings rotation plans from:
-	//   Probe      the hive-provider-usage ConfigMap the bash probes publish
-	//              (default — shadow must compare decision logic on the SAME
-	//              inputs the bash job sees, or every diff is ambiguous);
-	//   UsagePool  UsagePool status (ccusage consumption vs limit), falling
-	//              back to Probe for a provider with no pool.
+	//   UsagePool  (default) each provider's UsagePool .status.rotationReading:
+	//              ccleft's /readings reduced exactly as hive-lib.sh's
+	//              ccleft_probe does (HIVE_PROBE_SOURCE=ccleft, the bash
+	//              default), falling back per provider to the ConfigMap below
+	//              when the pool has no fresh reading. The ccusage sidecar is
+	//              NOT needed for this.
+	//   Probe      the hive/hive-provider-usage ConfigMap only.
 	// +optional
 	// +kubebuilder:validation:Enum=Probe;UsagePool
 	RotationUsageSource string `json:"rotationUsageSource,omitempty"`
@@ -111,12 +117,62 @@ type HiveSpokeSpec struct {
 	// Rotation tunes the placement policy. Every default is hive-rotate.sh's.
 	// +optional
 	Rotation *RotationPolicySpec `json:"rotation,omitempty"`
+
+	// Pace tunes the burn-rate pacer (hive-pace.sh). It runs under
+	// RotationMode: Shadow plans, Enforce actuates this spoke's agents.
+	// +optional
+	Pace *PaceSpec `json:"pace,omitempty"`
+
+	// ContributorNamespace holds the fleet-wide contributor Deployments the
+	// PRIMARY spoke scales with provider headroom. Default hive-contributors.
+	// +optional
+	ContributorNamespace string `json:"contributorNamespace,omitempty"`
+}
+
+// PaceSpec mirrors hive-pace.sh's HIVE_PACE_* actuation knobs. The verdict
+// knobs (deadband, sample counts, Kiro safety/hot/cold) live on the
+// UsagePool that computes the verdict.
+type PaceSpec struct {
+	// +optional
+	Disabled bool `json:"disabled,omitempty"`
+	// IntervalMinutes between pace ticks (the CronJob ran 5,25,45). Default 20.
+	// +optional
+	IntervalMinutes int32 `json:"intervalMinutes,omitempty"`
+	// FleetOrder places this spoke in the fleet-wide pace order
+	// (HIVE_PACE_NAMESPACES "hive hive-reef hive-hanthor"): one notch per
+	// provider per tick goes to the FIRST eligible agent in that order. Lower
+	// first; ties by namespace.
+	// +optional
+	FleetOrder int32 `json:"fleetOrder,omitempty"`
+	// DisableKiroBudget paces Kiro with the generic fit instead of its credit
+	// budget (HIVE_PACE_KIRO_BUDGET=0).
+	// +optional
+	DisableKiroBudget bool `json:"disableKiroBudget,omitempty"`
+	// KiroPromoteMax: promote only if the projected burn/allowed stays at or
+	// under this. Decimal string, default "0.8".
+	// +optional
+	KiroPromoteMax string `json:"kiroPromoteMax,omitempty"`
+	// Kiro demotions per tick. Default 4.
+	// +optional
+	KiroMaxDemote int32 `json:"kiroMaxDemote,omitempty"`
+	// Kiro promotions per tick. Default 1.
+	// +optional
+	KiroMaxPromote int32 `json:"kiroMaxPromote,omitempty"`
+	// Kiro cap requests (move off Kiro) per tick. Default 2.
+	// +optional
+	KiroMaxEvict int32 `json:"kiroMaxEvict,omitempty"`
+	// KiroEvictTTLSeconds: how long a cap request stands. Default 21600.
+	// +optional
+	KiroEvictTTLSeconds int32 `json:"kiroEvictTTLSeconds,omitempty"`
+	// EvictTargetMaxPct: a pool is a cap target only below this. Default 85.
+	// +optional
+	EvictTargetMaxPct int32 `json:"evictTargetMaxPct,omitempty"`
 }
 
 // RotationPolicySpec mirrors hive-rotate.sh's HIVE_ROTATE_* knobs.
 type RotationPolicySpec struct {
 	// Thresholds: provider → percent at which it counts as exhausted.
-	// Defaults: openai 85, anthropic 90, google 90, deepseek 100, other 85.
+	// Defaults: openai 85, anthropic 90, google 90, kiro 95, other 85.
 	// +optional
 	Thresholds map[string]int32 `json:"thresholds,omitempty"`
 	// HighVolumeCadenceSeconds: agents kicked at least this often are
@@ -133,7 +189,23 @@ type RotationPolicySpec struct {
 	DisableAutoResume bool `json:"disableAutoResume,omitempty"`
 	// +optional
 	DisableMeteredFailover bool `json:"disableMeteredFailover,omitempty"`
-	// PeakProviders are avoided (softly) during PeakWindows. Default deepseek.
+	// KiroMinCadenceSeconds: agents kicked more often than this never go on
+	// kiro, and are not sticky there, unless their current provider is
+	// positively exhausted. Default 900.
+	// +optional
+	KiroMinCadenceSeconds int32 `json:"kiroMinCadenceSeconds,omitempty"`
+	// CanaryCooldownMinutes keeps canaries off a pool rotation just left
+	// because it was exhausted. Default 720.
+	// +optional
+	CanaryCooldownMinutes int32 `json:"canaryCooldownMinutes,omitempty"`
+	// IntervalMinutes between Enforce applies (the CronJobs ran every 20
+	// minutes; /api/status lags a mutation by minutes, so chained applies
+	// re-decide on stale state). The plan itself is recomputed every
+	// reconcile. Default 20.
+	// +optional
+	IntervalMinutes int32 `json:"intervalMinutes,omitempty"`
+	// PeakProviders are avoided (softly) during PeakWindows. Default none
+	// (DeepSeek, the only peak-priced pool, was dropped 2026-09-24).
 	// +optional
 	PeakProviders []string `json:"peakProviders,omitempty"`
 	// PeakWindows, UTC weekdays, "HH:MM-HH:MM,…". Default 01:00-04:00,06:00-10:00.
@@ -255,6 +327,80 @@ type HiveSpokeStatus struct {
 	BudgetExhausted bool `json:"budgetExhausted,omitempty"`
 	// +optional
 	ObservedAt *metav1.Time `json:"observedAt,omitempty"`
+
+	// Journal is rotation's and the pacer's memory, owned by this
+	// controller once the spoke is in Enforce (the bash jobs kept it on the
+	// hive-ops-state PVC). In Shadow it stays empty and the planner infers
+	// pace demotions instead.
+	// +optional
+	Journal *RotationJournal `json:"journal,omitempty"`
+	// RotationAppliedAt is the last Enforce apply (rotation.intervalMinutes).
+	// +optional
+	RotationAppliedAt *metav1.Time `json:"rotationAppliedAt,omitempty"`
+	// ContributorPlanText is the contributors section of the plan (primary
+	// spoke only), as hive-rotate.sh prints it.
+	// +optional
+	ContributorPlanText []string `json:"contributorPlanText,omitempty"`
+	// PacePlan is the pacer's actions for THIS spoke's agents at the last
+	// pace tick.
+	// +optional
+	PacePlan []RotationDecision `json:"pacePlan,omitempty"`
+	// PacePlanText is the FLEET-wide pace plan as hive-pace apply prints it
+	// (verdict table, kiro budget, actions, footer), for diffing against the
+	// hive-pace job log.
+	// +optional
+	PacePlanText []string `json:"pacePlanText,omitempty"`
+	// PaceTickAt is the last pace tick.
+	// +optional
+	PaceTickAt *metav1.Time `json:"paceTickAt,omitempty"`
+}
+
+// RotationJournal replaces the bash state files.
+type RotationJournal struct {
+	// Stranded: agents rotation paused because their provider ran dry and
+	// no rung would take them (/state/…/stranded).
+	// +optional
+	Stranded []JournalPlacement `json:"stranded,omitempty"`
+	// PaceDemoted: the ORIGINAL rung the pacer demoted each agent from
+	// (pace-demoted). Rotation counts a demoted rung as in-tier; the pacer
+	// restores only these.
+	// +optional
+	PaceDemoted []JournalPlacement `json:"paceDemoted,omitempty"`
+	// KiroEvict: the pacer's requests to move agents off Kiro (kiro-evict).
+	// +optional
+	KiroEvict []KiroEvictRequest `json:"kiroEvict,omitempty"`
+	// CanaryCooldown: pools rotation evicted because they were exhausted
+	// (canary-cool-<provider>).
+	// +optional
+	CanaryCooldown []ProviderCooldown `json:"canaryCooldown,omitempty"`
+}
+
+// JournalPlacement is one journal row.
+type JournalPlacement struct {
+	Agent    string `json:"agent"`
+	Provider string `json:"provider,omitempty"`
+	Backend  string `json:"backend"`
+	Model    string `json:"model"`
+	// +optional
+	At *metav1.Time `json:"at,omitempty"`
+	// Inferred: seeded from the placement itself when the spoke was
+	// promoted (the bash journal was not imported), not written by an
+	// action of this controller.
+	// +optional
+	Inferred bool `json:"inferred,omitempty"`
+}
+
+// KiroEvictRequest asks rotation to move an agent off Kiro onto Targets.
+type KiroEvictRequest struct {
+	Agent   string      `json:"agent"`
+	Expiry  metav1.Time `json:"expiry"`
+	Targets []string    `json:"targets"`
+}
+
+// ProviderCooldown keeps canaries off a provider until Until.
+type ProviderCooldown struct {
+	Provider string      `json:"provider"`
+	Until    metav1.Time `json:"until"`
 }
 
 // +kubebuilder:object:root=true

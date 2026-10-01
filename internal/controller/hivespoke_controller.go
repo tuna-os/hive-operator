@@ -38,9 +38,12 @@ type HiveSpokeReconciler struct {
 	client.Client
 	Hive     *hiveclient.Client
 	Interval time.Duration
-	// Actuator applies rotation decisions in Enforce mode. Nil keeps the
-	// controller planning-only even when a spoke says Enforce.
+	// Actuator overrides how Enforce decisions are applied (tests). Nil:
+	// a HiveActuator bound to the spoke's pod and X-Hive-Internal token.
+	// Nothing is ever applied unless the spoke's rotationMode is Enforce.
 	Actuator rotation.Actuator
+	// Now overrides the clock (tests).
+	Now func() time.Time
 }
 
 // rawAgent is one agent entry as /api/status reports it, before folding in
@@ -157,11 +160,19 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Build the same placement decision set in Shadow and Enforce. Keeping one
 	// planner is what makes a week of shadow output meaningful: promotion only
 	// changes whether the already-visible actions are applied.
-	probe := r.providerUsage(ctx, &sp)
-	sp.Status.Providers = probe
+	now := time.Now().UTC()
+	if r.Now != nil {
+		now = r.Now().UTC()
+	}
+	readings, sources := r.rotationReadings(ctx, &sp, now)
+	sp.Status.Providers = providerStates(&sp, readings)
 	sp.Status.RotationPlan, sp.Status.RotationPlanText, sp.Status.RotationInputs = nil, nil, ""
 	if rotationMode != hivev1.ModeObserve {
-		r.rotate(ctx, &sp, rotationMode, probe)
+		act := r.Actuator
+		if act == nil && r.Hive != nil {
+			act = &rotation.HiveActuator{API: boundAPI{c: r.Hive, pod: pod, token: token}}
+		}
+		r.rotate(ctx, &sp, rotationMode, readings, sources, act, now)
 	}
 
 	// Budget. BUDGET_EXHAUSTED is the governor's own suppression gate: when it
@@ -183,8 +194,8 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	metrics.SpokeReachable.WithLabelValues(sp.Name, sp.Spec.Namespace).Set(1)
 	sp.Status.Reachable = true
-	now := metav1.Now()
-	sp.Status.ObservedAt = &now
+	observed := metav1.NewTime(now)
+	sp.Status.ObservedAt = &observed
 	if err := r.Status().Update(ctx, &sp); err != nil {
 		return ctrl.Result{}, err
 	}
