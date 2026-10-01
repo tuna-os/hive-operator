@@ -2,26 +2,21 @@
 //
 // AUTH, WHICH IS NOT OBVIOUS
 // --------------------------
-// Two credentials exist and they are not interchangeable:
+// Everything goes through pod exec to 127.0.0.1:3002 with the spoke's shared
+// dashboard token in X-Hive-Internal. The public hostname is login-gated and
+// the node proxy on :3001 strips the internal header.
 //
-//	X-Hive-Internal: <token>   authenticates READS. Every mutation returns
-//	                           {"error":"owner access required"}. Forged
-//	                           X-Hive-User / X-Hive-Role headers are rejected.
-//	Cookie: hive_session=<id>  full owner access. This is the one for writes.
+// On hive v6 that header is owner-equivalent: with no hive_session cookie
+// alongside it, authenticate() grants a verified owner identity, so pause,
+// resume, kick and the atomic PUT /api/config/agent/{name}/models all work
+// headlessly (hivecommons/hive#4134). Do NOT send a session cookie with it —
+// a cookie scopes the request down to that user's live allowlist role.
 //
-// The cookie name is `hive_session` with an underscore. `hive-session-v1`
-// appears in the binary and looks right; it is not the cookie name.
-//
-// Sessions live in /data/dashboard-sessions.json inside the pod and are minted
-// only by a GitHub device-flow login. There is no headless way to create one.
-// Pick the newest by expiry and do NOT filter locally on expiry: the store
-// writes the pod's UTC offset while a caller writes its own, and a
-// lexicographic ISO-8601 compare across differing offsets silently discards
-// live sessions near the boundary. The server is the only authority.
-//
-// Everything goes through `kubectl exec`-equivalent pod exec to 127.0.0.1:3002.
-// The public hostname is login-gated and the node proxy on :3001 strips the
-// internal header.
+// This replaces the owner session cookie the bash ops used. Those sessions are
+// minted only by a GitHub device-flow login and expire, and every mutation
+// silently stopped the day the newest one did. On v5 the same header was
+// read-only ({"error":"owner access required"}), which is why the cookie path
+// existed at all.
 package hiveclient
 
 import (
@@ -30,7 +25,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"sort"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -98,40 +92,6 @@ func (c *Client) Sh(ctx context.Context, ns, pod, script string) (string, error)
 	return out, nil
 }
 
-type sessionRec struct {
-	Role      string `json:"Role"`
-	ExpiresAt string `json:"ExpiresAt"`
-}
-
-// OwnerSession returns the newest owner session id, or "" when none exists.
-//
-// Newest-by-expiry with no local expiry filter — see the package comment.
-func (c *Client) OwnerSession(ctx context.Context, ns, pod string) (string, error) {
-	out, err := c.Sh(ctx, ns, pod, "cat /data/dashboard-sessions.json 2>/dev/null")
-	if err != nil || strings.TrimSpace(out) == "" {
-		return "", err
-	}
-	var m map[string]sessionRec
-	if err := json.Unmarshal([]byte(out), &m); err != nil {
-		return "", fmt.Errorf("parse session store: %w", err)
-	}
-	type kv struct {
-		id  string
-		exp string
-	}
-	var owners []kv
-	for id, r := range m {
-		if r.Role == "owner" {
-			owners = append(owners, kv{id, r.ExpiresAt})
-		}
-	}
-	if len(owners) == 0 {
-		return "", nil
-	}
-	sort.Slice(owners, func(i, j int) bool { return owners[i].exp > owners[j].exp })
-	return owners[0].id, nil
-}
-
 // GetJSON performs an authenticated read via the internal header.
 func (c *Client) GetJSON(ctx context.Context, ns, pod, token, path string, v any) error {
 	script := fmt.Sprintf(
@@ -147,16 +107,46 @@ func (c *Client) GetJSON(ctx context.Context, ns, pod, token, path string, v any
 	return json.Unmarshal([]byte(out), v)
 }
 
-// Post performs a mutation with the owner session cookie.
+// Do performs an authenticated request and returns the response body.
 //
 // Pass curl straight to exec rather than wrapping it in another `sh -c` with an
 // interpolated secret: that has produced responses that parse but describe a
 // different request.
-func (c *Client) Post(ctx context.Context, ns, pod, session, path string) (string, error) {
-	script := fmt.Sprintf(
-		`curl -sS -m 75 -X POST -H %s %s 2>&1`,
-		ShellQuote("Cookie: hive_session="+session), ShellQuote(APIAddr+path))
+func (c *Client) Do(ctx context.Context, ns, pod, token, method, path string, body []byte) (string, error) {
+	script := fmt.Sprintf(`curl -sS -m 75 -X %s -H %s`, ShellQuote(method), ShellQuote("X-Hive-Internal: "+token))
+	if body != nil {
+		script += fmt.Sprintf(` -H 'Content-Type: application/json' --data-raw %s`, ShellQuote(string(body)))
+	}
+	script += " " + ShellQuote(APIAddr+path) + " 2>&1"
 	return c.Sh(ctx, ns, pod, script)
+}
+
+// Post performs a body-less owner mutation such as pause, resume or kick.
+func (c *Client) Post(ctx context.Context, ns, pod, token, path string) (string, error) {
+	return c.Do(ctx, ns, pod, token, "POST", path, nil)
+}
+
+// Placement is the body of PUT /api/config/agent/{name}/models.
+//
+// One call sets backend, model and effort and is followed by a single restart.
+// The older /api/switch then /api/model sequence could leave an agent on a
+// backend/model pair that cannot launch when the second call failed.
+type Placement struct {
+	Backend string `json:"backend,omitempty"`
+	Model   string `json:"model,omitempty"`
+	// ReasoningEffort nil leaves the effort unchanged; a pointer to "" resets
+	// it to the backend default.
+	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+}
+
+// Place applies a placement atomically and marks the fields operator-owned, so
+// the ACMM pack apply on restart cannot revert them.
+func (c *Client) Place(ctx context.Context, ns, pod, token, agent string, p Placement) (string, error) {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return "", err
+	}
+	return c.Do(ctx, ns, pod, token, "PUT", "/api/config/agent/"+EscapePath(agent)+"/models", b)
 }
 
 // ShellQuote single-quotes a string for /bin/sh.

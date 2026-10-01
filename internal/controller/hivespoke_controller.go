@@ -353,45 +353,22 @@ func planRotation(agents []hivev1.AgentState, providers []hivev1.ProviderState, 
 }
 
 func (r *HiveSpokeReconciler) applyRotation(ctx context.Context, sp *hivev1.HiveSpoke, pod string, d *hivev1.RotationDecision) string {
-	session, err := r.Hive.OwnerSession(ctx, sp.Spec.Namespace, pod)
-	if err != nil || session == "" {
-		return "no usable owner session"
+	token, err := r.dashboardToken(ctx, sp.Spec.Namespace)
+	if err != nil {
+		return "no dashboard token: " + err.Error()
 	}
-	post := func(path, want string) error {
-		out, err := r.Hive.Post(ctx, sp.Spec.Namespace, pod, session, path)
-		if err != nil {
-			return err
-		}
-		var response map[string]any
-		if json.Unmarshal([]byte(out), &response) != nil || response["status"] != want {
-			return fmt.Errorf("unexpected response: %.200s", out)
-		}
-		return nil
-	}
-	if d.FromBackend != d.ToBackend {
-		if err := post("/api/switch/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.ToBackend), "switched"); err != nil {
-			return err.Error()
-		}
-	}
-	if d.FromModel != d.ToModel {
-		if err := post("/api/model/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.ToModel), "model_set"); err != nil {
-			if d.FromBackend != d.ToBackend {
-				_, _ = r.Hive.Post(ctx, sp.Spec.Namespace, pod, session, "/api/switch/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(d.FromBackend))
-			}
-			return "model change failed and backend was rolled back: " + err.Error()
-		}
-	}
+	p := hiveclient.Placement{Backend: d.ToBackend, Model: d.ToModel}
 	if d.FromEffort != d.ToEffort {
 		effort := d.ToEffort
-		if effort == "" {
-			effort = "default"
-		}
-		if err := post("/api/effort/"+hiveclient.EscapePath(d.Agent)+"/"+hiveclient.EscapePath(effort), "effort_set"); err != nil {
-			return "placement changed but effort change failed: " + err.Error()
-		}
+		p.ReasoningEffort = &effort
 	}
-	if err := post("/api/kick/"+hiveclient.EscapePath(d.Agent), "kicked"); err != nil {
-		return "placement changed but kick failed: " + err.Error()
+	out, err := r.Hive.Place(ctx, sp.Spec.Namespace, pod, token, d.Agent, p)
+	if err != nil {
+		return err.Error()
+	}
+	var response map[string]any
+	if json.Unmarshal([]byte(out), &response) != nil || response["error"] != nil {
+		return fmt.Sprintf("unexpected response: %.200s", out)
 	}
 	return ""
 }
