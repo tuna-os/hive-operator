@@ -34,10 +34,10 @@ func hkSample(t *testing.T, mode hivev1.ReconcileMode) *hivev1.HiveHousekeeping 
 	return &hk
 }
 
-// liveCronJobs is the 2026-10-01T18:00Z snapshot of ns hive, with UIDs.
+// liveCronJobs is the 2026-10-01T19:15Z snapshot of ns hive, with UIDs.
 func liveCronJobs(t *testing.T) []client.Object {
 	t.Helper()
-	b, err := os.ReadFile("../housekeeping/testdata/live-cronjobs-20261001T1800.yaml")
+	b, err := os.ReadFile("../housekeeping/testdata/live-cronjobs-20261001T1915.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,8 +201,8 @@ func TestHousekeepingPerJobMode(t *testing.T) {
 func TestHousekeepingRetireGated(t *testing.T) {
 	hk := hkSample(t, hivev1.ModeEnforce)
 	hk.Spec.Retire = []hivev1.RetiredCronJob{
-		{Name: "hive-rotate-hanthor"}, // suspended in the snapshot
-		{Name: "hive-rotate"},         // NOT suspended
+		{Name: "hive-rotate"},               // suspended in the snapshot
+		{Name: "hive-discord-daily-report"}, // NOT suspended
 		{Name: "hive-gone"},
 	}
 	c := hkClient(t, hk)
@@ -211,19 +211,19 @@ func TestHousekeepingRetireGated(t *testing.T) {
 	for _, r := range got.Status.Retired {
 		states[r.Name] = r.State
 	}
-	if states["hive-rotate-hanthor"] != "Deleted" || states["hive-rotate"] != "Blocked" || states["hive-gone"] != "Gone" {
+	if states["hive-rotate"] != "Deleted" || states["hive-discord-daily-report"] != "Blocked" || states["hive-gone"] != "Gone" {
 		t.Fatalf("retire states %v", states)
 	}
-	getCJ(t, c, "hive-rotate") // still there
+	getCJ(t, c, "hive-discord-daily-report") // still there
 
 	hk2 := hkSample(t, hivev1.ModeShadow)
-	hk2.Spec.Retire = []hivev1.RetiredCronJob{{Name: "hive-watchdog-reef"}}
+	hk2.Spec.Retire = []hivev1.RetiredCronJob{{Name: "hive-watchdog"}}
 	c2 := hkClient(t, hk2)
 	got = runHK(t, c2, "fleet")
 	if got.Status.Retired[0].State != "WouldDelete" {
 		t.Fatalf("shadow retire: %+v", got.Status.Retired)
 	}
-	getCJ(t, c2, "hive-watchdog-reef")
+	getCJ(t, c2, "hive-watchdog")
 }
 
 // A CronJob another controller owns is never taken over.

@@ -26,7 +26,7 @@ func loadSample(t *testing.T) *hivev1.HiveHousekeeping {
 
 func loadLive(t *testing.T) map[string]*batchv1.CronJob {
 	t.Helper()
-	b, err := os.ReadFile("testdata/live-cronjobs-20261001T1800.yaml")
+	b, err := os.ReadFile("testdata/live-cronjobs-20261001T1915.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,13 +42,14 @@ func loadLive(t *testing.T) map[string]*batchv1.CronJob {
 }
 
 // TestHousekeepingSampleRendersLive: the sample IS the live fleet. Every job
-// renders to exactly the live CronJob (the snapshot of 2026-10-01T18:00Z),
+// renders to exactly the live CronJob (the snapshot of 2026-10-01T19:15Z),
 // so adopting it in Enforce changes nothing but metadata.
 func TestHousekeepingSampleRendersLive(t *testing.T) {
 	hk := loadSample(t)
 	live := loadLive(t)
-	if hk.Spec.Mode != hivev1.ModeShadow {
-		t.Errorf("sample mode %q — promotion is a separate, reviewed change", hk.Spec.Mode)
+	// The sample records what is deployed: Enforce since 2026-10-01 (#50).
+	if hk.Spec.Mode != hivev1.ModeEnforce {
+		t.Errorf("sample mode %q, want Enforce (the deployed state)", hk.Spec.Mode)
 	}
 	want := []string{"hive-shared-auth", "hive-tiers", "hive-inventory", "hive-pi-kiro",
 		"hive-cli-update", "hive-repo-sync", "hive-metrics", "hive-activity"}
