@@ -8,6 +8,7 @@ rules:
   - ""
   resources:
   - configmaps
+  - nodes
   - pods
   - secrets
   verbs:
@@ -21,8 +22,26 @@ rules:
   verbs:
   - create
 - apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
   - hive.tunaos.org
   resources:
+  - hivereleases
   - hivespokes
   - modelladders
   - sharedauths
@@ -35,6 +54,7 @@ rules:
 - apiGroups:
   - hive.tunaos.org
   resources:
+  - hivereleases/status
   - hivespokes/status
   - modelladders/status
   - sharedauths/status

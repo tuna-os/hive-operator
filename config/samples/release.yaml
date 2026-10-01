@@ -1,0 +1,45 @@
+# The hive image version, owned by the operator. Replaces the hive/hive-upgrade
+# CronJob (see docs/release.md). Starts in Shadow: it resolves v6-latest to a
+# digest and reports the plan in status and events, and changes nothing.
+#
+#   kubectl get hiverelease hive -o yaml
+#   kubectl get events -n default --field-selector involvedObject.name=hive
+apiVersion: hive.tunaos.org/v1alpha1
+kind: HiveRelease
+metadata:
+  name: hive
+spec:
+  image: ghcr.io/hivecommons/hive
+  # Upstream publishes v6 only as moving tags (v6-latest / edge). The operator
+  # deploys the digest the tag pointed at, labelled v6-<revision12>.
+  track: v6-latest
+  mode: Shadow
+  soak: 10m
+  pollInterval: 1h
+  cooldown: 20h
+  # Rollouts START only in this window (a started one always finishes or
+  # rolls back). Same slot the CronJob used.
+  window: {start: "04:30", end: "06:30", timeZone: America/New_York}
+  # Digests or version labels never to deploy, in addition to the ones the
+  # operator blocklists itself in status.blocklist after a failed gate.
+  blocklist: []
+  # pin: v6-latest@sha256:...   # freeze the fleet on one image
+  targets:
+    # In order; the first is the canary (personal, unbranded).
+    - name: hanthor
+      spoke: hanthor
+    - name: reef
+      spoke: reef
+    - name: school
+      spoke: school
+    # The hub publishes the same moving tags (ghcr.io/hivecommons/hive-hub:v6-latest,
+    # verified 2026-10-01) but runs v5.105.10 today. Moving it v5→v6 is a
+    # major-version change, so it is Held until allowMajorChange is set (or a
+    # pin is given) — a deliberate decision, not a side effect of tracking.
+    - name: hub
+      namespace: hive-hub
+      deployment: hive-hub
+      container: hub
+      image: ghcr.io/hivecommons/hive-hub
+      healthURL: http://hive-hub.hive-hub.svc:3001/
+      # allowMajorChange: true

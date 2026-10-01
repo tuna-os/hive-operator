@@ -4,12 +4,14 @@ A Kubernetes operator for the tuna-os Hive fleet: the rotation, healing,
 credential-sharing and pacing that currently run as ~12 shell CronJobs, modelled
 as CRDs and controllers, with Prometheus metrics and a fleet dashboard.
 
-**Status: early.** Three controllers exist: `HiveSpoke`, `ModelLadder`, and
-`SharedAuth`. All default to Shadow — `HiveSpoke`'s rotation planner runs
-alongside the legacy CronJobs rather than replacing them. Nothing has been
-cut over yet. Rotation is mid-promotion; see
+**Status: early.** Four controllers exist: `HiveSpoke`, `ModelLadder`,
+`SharedAuth`, and `HiveRelease`. All default to Shadow — `HiveSpoke`'s rotation
+planner runs alongside the legacy CronJobs rather than replacing them. Nothing
+has been cut over yet. Rotation is mid-promotion; see
 [`docs/rotation-promotion.md`](docs/rotation-promotion.md) for the active
-shadow window and the cutover steps.
+shadow window and the cutover steps. `HiveRelease` takes over the hive image
+version from the suspended `hive-upgrade` CronJob; see
+[`docs/release.md`](docs/release.md).
 
 ## Why
 
@@ -35,6 +37,11 @@ point of this project; the controllers are how the numbers stay honest.
   what the backends actually offer.
 - **`SharedAuth`** — one credential store shared across spokes, verified by
   write-through.
+- **`HiveRelease`** — the hive image version: a tag (`v6-latest`) or semver line
+  resolved to a digest, rolled canary-first through the spokes with preflight, a
+  health gate that restores agent placements reset by the swap, soak, rollback
+  and blocklist. The operator is the single writer of the image; any other change
+  is reported as drift and, in Enforce, converged back.
 
 ### Reconcile modes
 
@@ -123,7 +130,8 @@ fleet or keeps filling a dead pool. `-1` is the sentinel.
 `hive_provider_used_percent`, `hive_budget_{used,limit}_tokens`,
 `hive_budget_exhausted`, `hive_shared_auth_consistent{namespace,dir}`,
 `hive_credential_present`, `hive_spoke_reachable`, `hive_reconcile_mode`,
-`hive_actions_total{applied}`, `hive_reconcile_errors_total`.
+`hive_actions_total{applied}`, `hive_reconcile_errors_total`,
+`hive_release_target_phase{phase}`, `hive_release_rollbacks_total`.
 
 Two alerts worth having on day one:
 
@@ -148,6 +156,7 @@ kubectl apply -f config/crd
 kubectl apply -f config/rbac
 kubectl apply -f config/manager
 kubectl apply -f config/samples/fleet.yaml
+kubectl apply -f config/samples/release.yaml   # HiveRelease, Shadow
 ```
 
 ## Roadmap
@@ -161,6 +170,10 @@ kubectl apply -f config/samples/fleet.yaml
    placement now run in Shadow across all three spokes. Promoting to Enforce
    and suspending the legacy `hive-rotate*` CronJobs is tracked in
    [`docs/rotation-promotion.md`](docs/rotation-promotion.md).
-4. `Watchdog` — pane classification and healing.
-5. `Nudge` — the budget-aware kick backstop.
-6. `Pace` — burn-rate pacing.
+4. ~~`HiveRelease` shadow controller~~ — done: image version with canary, gate,
+   soak, rollback, blocklist and drift detection. Promote to Enforce and
+   **delete** `hive/hive-upgrade` in the same change; see
+   [`docs/release.md`](docs/release.md).
+5. `Watchdog` — pane classification and healing.
+6. `Nudge` — the budget-aware kick backstop.
+7. `Pace` — burn-rate pacing.

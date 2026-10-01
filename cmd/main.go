@@ -89,6 +89,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := (&controller.HiveReleaseReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr, cs, cfg); err != nil {
+		setupLog.Error(err, "unable to set up HiveRelease controller")
+		os.Exit(1)
+	}
+
 	if dashAddr != "" {
 		srv := &dashboard.Server{Client: mgr.GetClient()}
 		// Runnable so it starts only after the cache is warm — otherwise the
