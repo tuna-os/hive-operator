@@ -61,6 +61,13 @@ spec:
           spec:
             description: HiveSpokeSpec is the desired state of one hive instance.
             properties:
+              agentTiers:
+                additionalProperties:
+                  type: string
+                description: |-
+                  AgentTiers maps agent → tier (T1/T2/T3). An agent with no tier is never
+                  placed. Default: hive-rotate.sh's AGENT_TIERS table.
+                type: object
               budget:
                 description: Budget caps weekly token spend. Omit or set 0 for uncapped.
                 properties:
@@ -153,6 +160,47 @@ spec:
                 items:
                   type: string
                 type: array
+              rotation:
+                description: Rotation tunes the placement policy. Every default is
+                  hive-rotate.sh's.
+                properties:
+                  agyMaxHighVolume:
+                    description: AgyMaxHighVolume caps high-volume agents on google
+                      per tick. Default 5.
+                    format: int32
+                    type: integer
+                  disableAutoResume:
+                    type: boolean
+                  disableCanaries:
+                    type: boolean
+                  disableMeteredFailover:
+                    type: boolean
+                  highVolumeCadenceSeconds:
+                    description: |-
+                      HighVolumeCadenceSeconds: agents kicked at least this often are
+                      high-volume — kept off openai (unless their provider is exhausted) and
+                      capped on google. Default 1800.
+                    format: int32
+                    type: integer
+                  peakProviders:
+                    description: PeakProviders are avoided (softly) during PeakWindows.
+                      Default deepseek.
+                    items:
+                      type: string
+                    type: array
+                  peakWindows:
+                    description: PeakWindows, UTC weekdays, "HH:MM-HH:MM,…". Default
+                      01:00-04:00,06:00-10:00.
+                    type: string
+                  thresholds:
+                    additionalProperties:
+                      format: int32
+                      type: integer
+                    description: |-
+                      Thresholds: provider → percent at which it counts as exhausted.
+                      Defaults: openai 85, anthropic 90, google 90, deepseek 100, other 85.
+                    type: object
+                type: object
               rotationMode:
                 default: Shadow
                 description: |-
@@ -162,6 +210,18 @@ spec:
                 - Observe
                 - Shadow
                 - Enforce
+                type: string
+              rotationUsageSource:
+                description: |-
+                  RotationUsageSource selects the provider readings rotation plans from:
+                    Probe      the hive-provider-usage ConfigMap the bash probes publish
+                               (default — shadow must compare decision logic on the SAME
+                               inputs the bash job sees, or every diff is ambiguous);
+                    UsagePool  UsagePool status (ccusage consumption vs limit), falling
+                               back to Probe for a provider with no pool.
+                enum:
+                - Probe
+                - UsagePool
                 type: string
             required:
             - namespace
@@ -175,6 +235,11 @@ spec:
                   description: AgentState is the observed state of one agent.
                   properties:
                     backend:
+                      type: string
+                    cadence:
+                      description: |-
+                        Cadence as /api/status renders it ("5m", "2h"). Rotation keeps
+                        high-volume agents (≤30m) off the subscription pools.
                       type: string
                     effort:
                       type: string
@@ -316,6 +381,12 @@ spec:
                 type: array
               reachable:
                 type: boolean
+              rotationInputs:
+                description: |-
+                  RotationInputs records what the plan was computed from ("Probe
+                  hive/hive-provider-usage @ 2026-09-24T17:12:32Z"), so a disagreement
+                  can be attributed to inputs rather than logic.
+                type: string
               rotationPlan:
                 description: |-
                   RotationPlan is replaced on every reconcile. In Shadow it is the exact
@@ -323,6 +394,9 @@ spec:
                 items:
                   description: RotationDecision is one auditable placement decision.
                   properties:
+                    action:
+                      description: 'Action: move, strand, resume or canary.'
+                      type: string
                     agent:
                       type: string
                     applied:
@@ -334,6 +408,8 @@ spec:
                     fromEffort:
                       type: string
                     fromModel:
+                      type: string
+                    fromProvider:
                       type: string
                     reason:
                       type: string
@@ -353,6 +429,14 @@ spec:
                   - toModel
                   - toProvider
                   type: object
+                type: array
+              rotationPlanText:
+                description: |-
+                  RotationPlanText is the plan rendered exactly as `hive-rotate.sh plan`
+                  prints it (agent lines + footer, without the contributors section), so
+                  shadow output can be diffed against the bash job's log with plain diff.
+                items:
+                  type: string
                 type: array
             type: object
         type: object

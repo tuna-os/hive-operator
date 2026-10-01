@@ -45,6 +45,7 @@ rules:
   - hivespokes
   - modelladders
   - sharedauths
+  - usagepools
   verbs:
   - get
   - list
@@ -58,6 +59,7 @@ rules:
   - hivespokes/status
   - modelladders/status
   - sharedauths/status
+  - usagepools/status
   verbs:
   - get
   - patch

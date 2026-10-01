@@ -1,0 +1,32 @@
+# hive-usage: the per-hive-pod usage sidecar (cmd/hive-usage) plus a pinned
+# ccusage binary. ccusage ships a static-pie Rust build per platform on npm as
+# @ccusage/ccusage-<os>-<arch>; no Node runtime is needed.
+FROM golang:1.26 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /out/hive-usage ./cmd/hive-usage
+
+FROM debian:trixie-slim AS ccusage
+# Bump both together; the integrity is npm's dist.integrity for the tarball:
+#   curl -s https://registry.npmjs.org/@ccusage/ccusage-linux-x64/<v> | jq -r .dist.integrity
+ARG CCUSAGE_VERSION=20.0.24
+ARG CCUSAGE_INTEGRITY=sha512-ydXM6AEUTO/T5dZK04GFGy6ePYBOjv3euQmJt0mDNg+/8SJDLWpg5GCtF9pnBrRR2GVA6b4PGouHe+ObLokBIw==
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl openssl && rm -rf /var/lib/apt/lists/*
+RUN set -eu; \
+    curl -fsSL -o /tmp/ccusage.tgz "https://registry.npmjs.org/@ccusage/ccusage-linux-x64/-/ccusage-linux-x64-${CCUSAGE_VERSION}.tgz"; \
+    want="${CCUSAGE_INTEGRITY#sha512-}"; \
+    got="$(openssl dgst -sha512 -binary /tmp/ccusage.tgz | openssl base64 -A)"; \
+    [ "$want" = "$got" ] || { echo "ccusage tarball integrity mismatch: $got" >&2; exit 1; }; \
+    tar -xzf /tmp/ccusage.tgz -C /tmp; \
+    install -m 0755 /tmp/package/bin/ccusage /ccusage; \
+    /ccusage --version
+
+FROM gcr.io/distroless/static:nonroot
+COPY --from=build /out/hive-usage /hive-usage
+COPY --from=ccusage /ccusage /usr/local/bin/ccusage
+# The agents' files are dev:node (1001:1000) with mode 660/2770: run as
+# nonroot with primary group node (set runAsGroup: 1000 in the pod spec).
+USER 65532:1000
+ENTRYPOINT ["/hive-usage"]

@@ -1,0 +1,77 @@
+{
+ "sessions": [
+  {
+   "cacheCreationTokens": 0,
+   "cacheReadTokens": 457216,
+   "costUSD": 0.02269372,
+   "directory": "2026/09/20",
+   "inputTokens": 56233,
+   "lastActivity": "2026-09-20T06:22:52.293Z",
+   "models": {
+    "gpt-5.6-luna": {
+     "cacheCreationTokens": 0,
+     "cacheReadTokens": 457216,
+     "inputTokens": 56233,
+     "isFallback": false,
+     "outputTokens": 1919,
+     "reasoningOutputTokens": 359,
+     "totalTokens": 515368
+    }
+   },
+   "outputTokens": 1919,
+   "reasoningOutputTokens": 359,
+   "sessionFile": "rollout-2026-09-20T00-56-37-01a0bd2c-5fb3-7ce3-b2d9-d8ea4eca57b9",
+   "sessionId": "2026/09/20/rollout-2026-09-20T00-56-37-01a0bd2c-5fb3-7ce3-b2d9-d8ea4eca57b9",
+   "totalTokens": 515368
+  },
+  {
+   "cacheCreationTokens": 0,
+   "cacheReadTokens": 354816,
+   "costUSD": 0.01677832,
+   "directory": "2026/09/20",
+   "inputTokens": 29828,
+   "lastActivity": "2026-09-20T06:22:17.924Z",
+   "models": {
+    "gpt-5.6-luna": {
+     "cacheCreationTokens": 0,
+     "cacheReadTokens": 354816,
+     "inputTokens": 29828,
+     "isFallback": false,
+     "outputTokens": 3097,
+     "reasoningOutputTokens": 423,
+     "totalTokens": 387741
+    }
+   },
+   "outputTokens": 3097,
+   "reasoningOutputTokens": 423,
+   "sessionFile": "rollout-2026-09-20T02-19-14-01a0bd78-05f0-77a0-8a9d-651e8b462a1a",
+   "sessionId": "2026/09/20/rollout-2026-09-20T02-19-14-01a0bd78-05f0-77a0-8a9d-651e8b462a1a",
+   "totalTokens": 387741
+  },
+  {
+   "cacheCreationTokens": 0,
+   "cacheReadTokens": 34304,
+   "costUSD": 0.00406768,
+   "directory": "2026/09/20",
+   "inputTokens": 15120,
+   "lastActivity": "2026-09-20T06:40:22.189Z",
+   "models": {
+    "gpt-5.6-luna": {
+     "cacheCreationTokens": 0,
+     "cacheReadTokens": 34304,
+     "inputTokens": 15120,
+     "isFallback": false,
+     "outputTokens": 298,
+     "reasoningOutputTokens": 60,
+     "totalTokens": 49722
+    }
+   },
+   "outputTokens": 298,
+   "reasoningOutputTokens": 60,
+   "sessionFile": "rollout-2026-09-20T02-37-34-01a0bd88-cd54-78b2-b018-9eda666cfa5d",
+   "sessionId": "2026/09/20/rollout-2026-09-20T02-37-34-01a0bd88-cd54-78b2-b018-9eda666cfa5d",
+   "totalTokens": 49722
+  }
+ ],
+ "totals": {}
+}

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -18,6 +17,7 @@ import (
 	hivev1 "github.com/tuna-os/hive-operator/api/v1alpha1"
 	"github.com/tuna-os/hive-operator/internal/hiveclient"
 	"github.com/tuna-os/hive-operator/internal/metrics"
+	"github.com/tuna-os/hive-operator/internal/rotation"
 )
 
 const spokeController = "hivespoke"
@@ -38,6 +38,9 @@ type HiveSpokeReconciler struct {
 	client.Client
 	Hive     *hiveclient.Client
 	Interval time.Duration
+	// Actuator applies rotation decisions in Enforce mode. Nil keeps the
+	// controller planning-only even when a spoke says Enforce.
+	Actuator rotation.Actuator
 }
 
 // rawAgent is one agent entry as /api/status reports it, before folding in
@@ -46,6 +49,8 @@ type rawAgent struct {
 	Name          string `json:"name"`
 	CLI           string `json:"cli"`
 	Model         string `json:"model"`
+	GovModel      string `json:"govModel"`
+	Cadence       string `json:"cadence"`
 	Effort        string `json:"reasoningEffort"`
 	Mode          string `json:"mode"`
 	Paused        bool   `json:"paused"`
@@ -152,27 +157,11 @@ func (r *HiveSpokeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Build the same placement decision set in Shadow and Enforce. Keeping one
 	// planner is what makes a week of shadow output meaningful: promotion only
 	// changes whether the already-visible actions are applied.
-	sp.Status.Providers = r.providerUsage(ctx, &sp)
-	sp.Status.RotationPlan = nil
+	probe := r.providerUsage(ctx, &sp)
+	sp.Status.Providers = probe
+	sp.Status.RotationPlan, sp.Status.RotationPlanText, sp.Status.RotationInputs = nil, nil, ""
 	if rotationMode != hivev1.ModeObserve {
-		ladderName := sp.Spec.LadderRef
-		if ladderName == "" {
-			ladderName = "fleet"
-		}
-		var ladder hivev1.ModelLadder
-		if err := r.Get(ctx, client.ObjectKey{Name: ladderName}, &ladder); err == nil {
-			sp.Status.RotationPlan = planRotation(sp.Status.Agents, sp.Status.Providers, ladder.Status.Effective)
-			for i := range sp.Status.RotationPlan {
-				decision := &sp.Status.RotationPlan[i]
-				applied := false
-				if rotationMode == hivev1.ModeEnforce {
-					decision.Error = r.applyRotation(ctx, &sp, pod, decision)
-					applied = decision.Error == ""
-					decision.Applied = applied
-				}
-				metrics.Action(spokeController, sp.Name, "rotate", applied)
-			}
-		}
+		r.rotate(ctx, &sp, rotationMode, probe)
 	}
 
 	// Budget. BUDGET_EXHAUSTED is the governor's own suppression gate: when it
@@ -235,6 +224,11 @@ type observation struct {
 func observeAgents(agents []rawAgent, runtimeState runtimeStateFile, ages map[string]int64, pinned map[string]bool) observation {
 	var obs observation
 	for _, a := range agents {
+		// govModel is what the governor launches and what hive-rotate.sh
+		// reads; model is the display field.
+		if a.GovModel != "" {
+			a.Model = a.GovModel
+		}
 		if persisted, ok := runtimeState.Agents[a.Name]; ok {
 			if persisted.Backend != "" {
 				a.CLI = persisted.Backend
@@ -245,7 +239,7 @@ func observeAgents(agents []rawAgent, runtimeState runtimeStateFile, ages map[st
 		}
 		od := a.OnDemand != nil && *a.OnDemand
 		st := hivev1.AgentState{
-			Name: a.Name, Backend: a.CLI, Model: a.Model, Effort: a.Effort, Mode: a.Mode,
+			Name: a.Name, Backend: a.CLI, Model: a.Model, Effort: a.Effort, Mode: a.Mode, Cadence: a.Cadence,
 			Paused: a.Paused, PausedTrigger: a.PausedTrigger, PausedReason: a.PausedReason,
 			OnDemand: od, IdleSeconds: ages[a.Name], Pinned: pinned[a.Name],
 		}
@@ -261,116 +255,6 @@ func observeAgents(agents []rawAgent, runtimeState runtimeStateFile, ages map[st
 		}
 	}
 	return obs
-}
-
-func (r *HiveSpokeReconciler) providerUsage(ctx context.Context, sp *hivev1.HiveSpoke) []hivev1.ProviderState {
-	var cm corev1.ConfigMap
-	err := r.Get(ctx, client.ObjectKey{Namespace: sp.Spec.Namespace, Name: "hive-provider-usage"}, &cm)
-	if err != nil && sp.Spec.Namespace != "hive" {
-		err = r.Get(ctx, client.ObjectKey{Namespace: "hive", Name: "hive-provider-usage"}, &cm)
-	}
-	providers := []string{"google", "meta", "deepseek", "openai", "anthropic"}
-	result := make([]hivev1.ProviderState, 0, len(providers))
-	for _, provider := range providers {
-		state := hivev1.ProviderState{Provider: provider, UsedPercent: -1, Note: "no reading"}
-		if err == nil {
-			state.Note = cm.Data[provider]
-			if fields := strings.Fields(state.Note); len(fields) > 0 && strings.HasSuffix(fields[0], "%") {
-				if n, parseErr := strconv.Atoi(strings.TrimSuffix(fields[0], "%")); parseErr == nil {
-					state.UsedPercent = int32(n)
-				}
-			}
-		}
-		metrics.ProviderUsedPercent.WithLabelValues(sp.Name, provider).Set(float64(state.UsedPercent))
-		result = append(result, state)
-	}
-	return result
-}
-
-func planRotation(agents []hivev1.AgentState, providers []hivev1.ProviderState, rungs []hivev1.Rung) []hivev1.RotationDecision {
-	usage := map[string]int32{}
-	for _, p := range providers {
-		usage[p.Provider] = p.UsedPercent
-	}
-	providerFor := func(backend, model string) string {
-		for _, rung := range rungs {
-			if rung.Backend == backend && rung.Model == model {
-				return rung.Provider
-			}
-		}
-		switch backend {
-		case "codex":
-			return "openai"
-		case "claude":
-			return "anthropic"
-		case "agy":
-			return "google"
-		case "muse":
-			return "meta"
-		case "pi":
-			return "deepseek"
-		}
-		return "unknown"
-	}
-	var plan []hivev1.RotationDecision
-	for _, agent := range agents {
-		if agent.Pinned || agent.OnDemand || agent.Paused {
-			continue
-		}
-		tier := agentTiers[agent.Name]
-		if tier == "" {
-			continue
-		}
-		currentProvider := providerFor(agent.Backend, agent.Model)
-		var currentRung *hivev1.Rung
-		for _, rung := range rungs {
-			if rung.Available && rung.Tier == tier && rung.Backend == agent.Backend && rung.Model == agent.Model {
-				copy := rung
-				currentRung = &copy
-				break
-			}
-		}
-		if currentRung != nil && usage[currentProvider] < 100 {
-			if currentRung.Effort == agent.Effort {
-				continue
-			}
-			plan = append(plan, hivev1.RotationDecision{Agent: agent.Name, FromBackend: agent.Backend, FromModel: agent.Model, FromEffort: agent.Effort, ToProvider: currentRung.Provider, ToBackend: currentRung.Backend, ToModel: currentRung.Model, ToEffort: currentRung.Effort, Reason: "reasoning effort differs from the tier rung"})
-			continue
-		}
-		for _, rung := range rungs {
-			if !rung.Available || rung.Tier != tier || usage[rung.Provider] >= 100 {
-				continue
-			}
-			reason := "current rung is not in the effective ladder"
-			if usage[currentProvider] >= 100 {
-				reason = currentProvider + " usage is exhausted"
-			}
-			plan = append(plan, hivev1.RotationDecision{Agent: agent.Name, FromBackend: agent.Backend, FromModel: agent.Model, FromEffort: agent.Effort, ToProvider: rung.Provider, ToBackend: rung.Backend, ToModel: rung.Model, ToEffort: rung.Effort, Reason: reason})
-			break
-		}
-	}
-	return plan
-}
-
-func (r *HiveSpokeReconciler) applyRotation(ctx context.Context, sp *hivev1.HiveSpoke, pod string, d *hivev1.RotationDecision) string {
-	token, err := r.dashboardToken(ctx, sp.Spec.Namespace)
-	if err != nil {
-		return "no dashboard token: " + err.Error()
-	}
-	p := hiveclient.Placement{Backend: d.ToBackend, Model: d.ToModel}
-	if d.FromEffort != d.ToEffort {
-		effort := d.ToEffort
-		p.ReasoningEffort = &effort
-	}
-	out, err := r.Hive.Place(ctx, sp.Spec.Namespace, pod, token, d.Agent, p)
-	if err != nil {
-		return err.Error()
-	}
-	var response map[string]any
-	if json.Unmarshal([]byte(out), &response) != nil || response["error"] != nil {
-		return fmt.Sprintf("unexpected response: %.200s", out)
-	}
-	return ""
 }
 
 func numFrom(m map[string]any, k string) (float64, bool) {
