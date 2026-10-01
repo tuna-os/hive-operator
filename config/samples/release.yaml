@@ -1,6 +1,6 @@
 # The hive image version, owned by the operator. Replaces the hive/hive-upgrade
-# CronJob (see docs/release.md). Starts in Shadow: it resolves v6-latest to a
-# digest and reports the plan in status and events, and changes nothing.
+# CronJob (see docs/release.md). Enforce since 2026-10-01, when hive-upgrade was
+# deleted in the same change. Set mode: Shadow to have it only report the plan.
 #
 #   kubectl get hiverelease hive -o yaml
 #   kubectl get events -n default --field-selector involvedObject.name=hive
@@ -13,7 +13,7 @@ spec:
   # Upstream publishes v6 only as moving tags (v6-latest / edge). The operator
   # deploys the digest the tag pointed at, labelled v6-<revision12>.
   track: v6-latest
-  mode: Shadow
+  mode: Enforce
   soak: 10m
   pollInterval: 1h
   cooldown: 20h
