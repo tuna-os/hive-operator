@@ -1,0 +1,16 @@
+usage: from ccleft (generated 2026-10-01T15:38:50Z)
+supervisor     liveness ok
+scanner        stalled  -> healing (restart #1)
+scanner        stalled  restarted (restarted)
+reviewer       liveness ok
+adjudicator    liveness ok
+ci-maintainer  liveness ok
+quality        liveness ok
+architect      liveness ok
+guide          liveness ok
+outreach       liveness ok
+sec-check      liveness ok
+telemetry      liveness ok
+operations     liveness ok
+strategist     liveness ok
+watchdog: 1 agent(s) healed

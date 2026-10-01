@@ -208,8 +208,12 @@ See DESIGN.md §7 for how to classify a difference before calling it a bug.
    soak, rollback, blocklist and drift detection. Promote to Enforce and
    **delete** `hive/hive-upgrade` in the same change; see
    [`docs/release.md`](docs/release.md).
-5. `Watchdog` — pane classification and healing.
-6. `Nudge` — the budget-aware kick backstop.
+5. ~~`Watchdog`~~ — ported into the HiveSpoke controller under
+   `spec.livenessMode` (Shadow): pane classification with a live-pane
+   recheck, stall detection, exponential heal backoff, mismatch/effort
+   repair, rotate-off through the rotation planner. Promote per spoke with
+   [`docs/liveness-promotion.md`](docs/liveness-promotion.md).
+6. ~~`Nudge`~~ — the budget-aware kick backstop, same field and doc.
 7. ~~`Pace`~~ — ported with rotation (branch `rotation/enforce-ready`): the
    hive-pace fit and the Kiro credit budget run under `rotationMode`; promote
    per spoke with [`docs/rotation-promotion.md`](docs/rotation-promotion.md).

@@ -519,8 +519,9 @@ func hhmm(s string) int {
 
 func line(format string, args ...any) string { return fmt.Sprintf(format, args...) }
 
-// Compute builds the placement plan. It never mutates Input.
-func Compute(in Input) Plan {
+// newState builds one tick's planner state: policy defaults, the agent
+// index, and LOGIN_BLOCKED.
+func newState(in Input) *state {
 	pol := in.Policy
 	if pol.Thresholds == nil {
 		pol = DefaultPolicy()
@@ -539,6 +540,13 @@ func Compute(in Input) Plan {
 			s.loginBlocked[s.providerOf(a)] = true
 		}
 	}
+	return s
+}
+
+// Compute builds the placement plan. It never mutates Input.
+func Compute(in Input) Plan {
+	s := newState(in)
+	pol := s.pol
 	var plan Plan
 	add := func(d Decision) { plan.Decisions = append(plan.Decisions, d) }
 

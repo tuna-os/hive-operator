@@ -1,0 +1,12 @@
+usage: from ccleft (generated 2026-10-01T15:43:50Z)
+supervisor     liveness ok
+scanner        liveness ok
+ci-maintainer  liveness ok
+quality        liveness ok
+architect      liveness ok
+guide          liveness ok
+sec-check      liveness ok
+telemetry      liveness ok
+operations     liveness ok
+strategist     liveness ok
+watchdog: 0 agent(s) healed

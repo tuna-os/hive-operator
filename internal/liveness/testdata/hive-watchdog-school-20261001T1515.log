@@ -1,0 +1,16 @@
+usage: from ccleft (generated 2026-10-01T15:13:49Z)
+status snapshot is 1790s old — stall detection skipped this pass
+supervisor     liveness ok
+scanner        liveness ok
+reviewer       liveness ok
+adjudicator    liveness ok
+ci-maintainer  liveness ok
+quality        liveness ok
+architect      liveness ok
+guide          liveness ok
+outreach       liveness ok
+sec-check      liveness ok
+telemetry      liveness ok
+operations     liveness ok
+strategist     liveness ok
+watchdog: 0 agent(s) healed

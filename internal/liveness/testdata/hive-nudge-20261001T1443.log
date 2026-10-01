@@ -1,0 +1,3 @@
+hive           adjudicator    idle 66m > 60m (longest cadence 30m x2) — kicked (queued)
+hive           reviewer       idle 61m > 60m (longest cadence 30m x2) — kicked (queued)
+nudge: 2 agent(s) nudged

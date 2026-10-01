@@ -1,0 +1,14 @@
+now 1790868265
+adjudicator 4213
+architect 403
+brainstorm -1
+ci-maintainer 14449
+guide 314
+operations 610406
+quality 6643
+reviewer 4217
+scanner 1048
+sec-check 12089
+strategist 14253
+supervisor 4269
+telemetry 1137804
