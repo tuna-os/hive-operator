@@ -5,11 +5,12 @@ go 1.26.0
 require (
 	github.com/go-logr/logr v1.4.3
 	github.com/prometheus/client_golang v1.24.1
-	github.com/tuna-os/ccleft v0.0.0-20260925113919-00ded18e65ed
+	github.com/tuna-os/ccleft v0.0.0-20260925130840-de7f9518db19
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0
 	k8s.io/client-go v0.37.0
 	sigs.k8s.io/controller-runtime v0.25.0
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -73,5 +74,4 @@ require (
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
-	sigs.k8s.io/yaml v1.6.0 // indirect
 )
