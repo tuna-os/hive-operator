@@ -228,3 +228,14 @@ See DESIGN.md §7 for how to classify a difference before calling it a bug.
 7. ~~`Pace`~~ — ported with rotation (branch `rotation/enforce-ready`): the
    hive-pace fit and the Kiro credit budget run under `rotationMode`; promote
    per spoke with [`docs/rotation-promotion.md`](docs/rotation-promotion.md).
+
+## Contributing
+
+For local build instructions, code generation, and commit guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+<!-- hive-contribute-plea: donated-compute appeal, keep in sync across repos -->
+## Contribute compute — no code needed
+
+No time to write code? You can still push this project's backlog forward. A TunaOS AI-agent hive works on this repository. Lend the hive your AI subscription or API tokens, and your machine runs contributor tasks from this project's backlog.
+
+- 🪸 [Contribute compute to the reef hive](https://reef.tunaos.org/contribute)
