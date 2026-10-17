@@ -37,6 +37,12 @@ type BandSpec struct {
 
 // ModelLadderSpec describes how to build the placement ladder.
 type ModelLadderSpec struct {
+	// MinimumScore requires an explicit finite rung score at or above this
+	// floor. Unscored models and efforts are ineligible. Omit to retain the
+	// legacy ladder and pacing behavior; invalid values fail closed.
+	// +optional
+	MinimumScore string `json:"minimumScore,omitempty"`
+
 	// BenchmarkURL supplies the ordering signal.
 	// +optional
 	BenchmarkURL string `json:"benchmarkURL,omitempty"`
@@ -84,9 +90,9 @@ type SecretKeyRef struct {
 type ModelLadderStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	// Effective is rank(benchmark) UNION builtin, then gated by the live
-	// inventory. De-duplicated on tier+provider+model+effort: a model can be a
-	// valid fallback at several tiers, and effort changes capacity and cost.
+	// Effective is rank(benchmark) UNION builtin, gated by live inventory and
+	// MinimumScore when configured. De-duplicated on tier+provider+backend+
+	// model+effort: tiers and effort distinguish placement and quality policy.
 	// +optional
 	Effective []Rung `json:"effective,omitempty"`
 	// Dropped rungs and why — the audit trail for "why is nothing at T1".

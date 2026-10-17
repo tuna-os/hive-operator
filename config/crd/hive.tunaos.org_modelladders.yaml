@@ -145,6 +145,12 @@ spec:
                 - name
                 - namespace
                 type: object
+              minimumScore:
+                description: |-
+                  MinimumScore requires an explicit finite rung score at or above this
+                  floor. Unscored models and efforts are ineligible. Omit to retain the
+                  legacy ladder and pacing behavior; invalid values fail closed.
+                type: string
               mode:
                 default: Shadow
                 description: |-
@@ -227,9 +233,9 @@ spec:
                 type: array
               effective:
                 description: |-
-                  Effective is rank(benchmark) UNION builtin, then gated by the live
-                  inventory. De-duplicated on tier+provider+model+effort: a model can be a
-                  valid fallback at several tiers, and effort changes capacity and cost.
+                  Effective is rank(benchmark) UNION builtin, gated by live inventory and
+                  MinimumScore when configured. De-duplicated on tier+provider+backend+
+                  model+effort: tiers and effort distinguish placement and quality policy.
                 items:
                   description: Rung is one placeable (provider, backend, model) at
                     a tier.

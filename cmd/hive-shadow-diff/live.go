@@ -40,13 +40,14 @@ var agentTiers = map[string]string{
 }
 
 type liveEnv struct {
-	ctx    context.Context
-	cs     kubernetes.Interface
-	hive   *hiveclient.Client
-	spokes []hivev1.HiveSpoke
-	ladder []rotation.Rung
-	cc     *usage.CcleftOutput
-	now    time.Time
+	ctx          context.Context
+	cs           kubernetes.Interface
+	hive         *hiveclient.Client
+	spokes       []hivev1.HiveSpoke
+	ladder       []rotation.Rung
+	minimumScore string
+	cc           *usage.CcleftOutput
+	now          time.Time
 }
 
 func loadSample(path string) ([]hivev1.HiveSpoke, hivev1.ModelLadder, error) {
@@ -248,11 +249,18 @@ func (e *liveEnv) readings() (map[string]rotation.Reading, string) {
 
 func rungsFrom(l hivev1.ModelLadder) []rotation.Rung {
 	var out []rotation.Rung
-	for _, r := range l.Spec.Builtin {
+	rungs := l.Spec.Builtin
+	if l.Spec.MinimumScore != "" {
+		rungs = l.Status.Effective
+	}
+	for _, r := range rungs {
+		if !rotation.ScoreMeets(r.Score, l.Spec.MinimumScore) {
+			continue
+		}
 		if r.Backend == "muse" && !strings.HasSuffix(r.Model, "-contributor") {
 			continue
 		}
-		out = append(out, rotation.Rung{Tier: r.Tier, Provider: r.Provider, Backend: r.Backend, Model: r.Model})
+		out = append(out, rotation.Rung{Tier: r.Tier, Provider: r.Provider, Backend: r.Backend, Model: r.Model, Effort: r.Effort, Score: r.Score})
 	}
 	return out
 }
@@ -307,7 +315,7 @@ func runLive(samplePath string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	e := &liveEnv{ctx: ctx, cs: cs, hive: hiveclient.New(cs, cfg), spokes: spokes, ladder: rungsFrom(ladder), now: time.Now().UTC()}
+	e := &liveEnv{ctx: ctx, cs: cs, hive: hiveclient.New(cs, cfg), spokes: spokes, ladder: rungsFrom(ladder), minimumScore: ladder.Spec.MinimumScore, now: time.Now().UTC()}
 	if err := e.ccleft(); err != nil {
 		fmt.Printf("ccleft unreadable (%v): readings from the ConfigMap\n", err)
 	}
@@ -341,7 +349,7 @@ func runLive(samplePath string) int {
 			fmt.Printf("   (pace view of %s: undid %s's moves of %v)\n", ns, paceJob, u)
 		}
 		for _, a := range paceAgents {
-			fa := rotation.FleetAgent{Namespace: ns, Agent: a}
+			fa := rotation.FleetAgent{Namespace: ns, Agent: a, MinimumScore: e.minimumScore, Eligible: e.ladder}
 			for _, r := range e.ladder {
 				if r.Tier == agentTiers[a.Name] {
 					fa.Members = append(fa.Members, r)
@@ -358,10 +366,10 @@ func runLive(samplePath string) int {
 			}
 		}
 		in := rotation.Input{Now: e.now, Namespace: ns, Primary: sp.Spec.PrimarySpoke == ns, PrimaryNamespace: "hive",
-			Agents: agents, Providers: readings, UsageSource: src, Tiers: agentTiers, Rungs: e.ladder,
-			Pins: map[string]bool{}, Holds: map[string]bool{}, Policy: rotation.DefaultPolicy()}
+			Agents: agents, Providers: readings, UsageSource: src, Tiers: agentTiers, Rungs: e.ladder, MinimumScore: e.minimumScore,
+			Pins: map[string]rotation.PinTarget{}, Holds: map[string]bool{}, Policy: rotation.DefaultPolicy()}
 		for _, p := range sp.Spec.Pins {
-			in.Pins[p.Agent] = true
+			in.Pins[p.Agent] = rotation.PinTarget{Backend: p.Backend, Model: p.Model}
 			pins[ns+"/"+p.Agent] = true
 		}
 		for _, h := range sp.Spec.Holds {

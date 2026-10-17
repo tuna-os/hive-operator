@@ -170,12 +170,12 @@ func ladderRungs(effective []hivev1.Rung) []rotation.Rung {
 		if !r.Available {
 			continue
 		}
-		k := r.Tier + "|" + r.Provider + "|" + r.Model
+		k := r.Tier + "|" + r.Provider + "|" + r.Backend + "|" + r.Model + "|" + r.Effort
 		if seen[k] {
 			continue
 		}
 		seen[k] = true
-		out = append(out, rotation.Rung{Tier: r.Tier, Provider: r.Provider, Backend: r.Backend, Model: r.Model})
+		out = append(out, rotation.Rung{Tier: r.Tier, Provider: r.Provider, Backend: r.Backend, Model: r.Model, Effort: r.Effort, Score: r.Score})
 	}
 	return out
 }
@@ -233,7 +233,7 @@ func buildRotationInput(sp *hivev1.HiveSpoke, readings map[string]rotation.Readi
 	in := rotation.Input{
 		Now: now, Namespace: sp.Spec.Namespace, Primary: isPrimary(sp), PrimaryNamespace: primaryNamespace(sp),
 		Providers: readings, Tiers: spokeTiers(sp), Rungs: rungs,
-		Pins: map[string]bool{}, Holds: map[string]bool{}, Policy: policyFrom(sp.Spec.Rotation),
+		Pins: map[string]rotation.PinTarget{}, Holds: map[string]bool{}, Policy: policyFrom(sp.Spec.Rotation),
 		Stranded: map[string]rotation.Placement{}, PaceDemoted: map[string]rotation.Placement{},
 		KiroEvict: map[string]rotation.KiroEvict{}, CanaryCooldown: map[string]time.Time{},
 	}
@@ -248,7 +248,7 @@ func buildRotationInput(sp *hivev1.HiveSpoke, readings map[string]rotation.Readi
 			Paused: a.Paused, OnDemand: a.OnDemand, PausedTrigger: a.PausedTrigger, Cadence: a.Cadence})
 	}
 	for _, p := range sp.Spec.Pins {
-		in.Pins[p.Agent] = true
+		in.Pins[p.Agent] = rotation.PinTarget{Backend: p.Backend, Model: p.Model}
 	}
 	for _, h := range sp.Spec.Holds {
 		in.Holds[h] = true
@@ -318,7 +318,7 @@ func (r *HiveSpokeReconciler) rotate(ctx context.Context, sp *hivev1.HiveSpoke, 
 			Reason: "NoLadder", Message: err.Error(), ObservedGeneration: sp.Generation})
 		return
 	}
-	rungs := ladderRungs(ladder.Status.Effective)
+	rungs := qualityRungs(&ladder)
 	enforce := mode == hivev1.ModeEnforce && act != nil
 	if enforce {
 		if n := seedPaceJournal(sp, rungs, now); n > 0 {
@@ -328,6 +328,8 @@ func (r *HiveSpokeReconciler) rotate(ctx context.Context, sp *hivev1.HiveSpoke, 
 		}
 	}
 	in := buildRotationInput(sp, readings, sources, rungs, now, mode)
+	in.MinimumScore = ladder.Spec.MinimumScore
+	r.qualityBudgetBlocks(ctx, &in)
 	plan := rotation.Compute(in)
 	sp.Status.RotationPlanText = plan.Lines(true)
 	srcCount := map[string]int{}

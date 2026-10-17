@@ -2,8 +2,10 @@ package v1alpha1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-// AgentPin fixes one agent's placement. Rotation must leave a pinned agent's
-// rung alone, and healing must not "repair" it back onto the ladder.
+// AgentPin fixes one agent's placement. A pin naming just the agent is
+// protect-only: rotation leaves its rung alone, and healing must not
+// "repair" it back onto the ladder. A pin naming backend AND model is
+// prescriptive: rotation moves the agent onto the pair when it drifts.
 //
 // This exists because a pin that anything else can overwrite is not a pin. The
 // hive config carries a `cli_pinned` field that the rotation script never read,
@@ -14,13 +16,17 @@ type AgentPin struct {
 	// Agent is the agent name, e.g. "supervisor".
 	Agent string `json:"agent"`
 	// Backend is the CLI that runs it: claude, codex, agy, pi. Optional:
-	// rotation only needs to know the agent is pinned (HIVE_ROTATE_PIN names
-	// agents, not placements); Backend/Model document the intended pair.
+	// with Model also set the pin is prescriptive — rotation converges the
+	// agent onto the pair (an atomic PUT /api/config/agent/{name}/models,
+	// which claims operator ownership so a pack re-apply cannot revert it)
+	// and healing never moves it away. This is the declarative way to keep
+	// an agent off a backend, e.g. pinning reviewer off copilot.
 	// +optional
 	Backend string `json:"backend,omitempty"`
 	// Model is the exact id the backend accepts. It need NOT be on the ladder —
 	// pinning supervisor to gpt-5.4-mini (the only codex model with no service
-	// tier, and so unmetered) is the motivating case.
+	// tier, and so unmetered) is the motivating case. With Backend also set,
+	// rotation moves the agent onto this model when it drifts anywhere else.
 	// +optional
 	Model string `json:"model,omitempty"`
 	// Reason is free text, surfaced in the dashboard and in events.

@@ -25,6 +25,9 @@ import "strings"
 //
 // ccusage source names are accepted as CLIs too (antigravity ≡ agy), and pi's
 // "[pi] " model prefix is stripped.
+//
+// omp provider-qualified selectors identify the billed account, not the model
+// family. Unknown namespaces must not borrow another provider's quota reading.
 func ProviderOf(cli, model string) string {
 	c := strings.ToLower(strings.TrimSpace(cli))
 	m := strings.ToLower(strings.TrimSpace(model))
@@ -34,6 +37,26 @@ func ProviderOf(cli, model string) string {
 		return "github"
 	case "muse":
 		return "meta"
+	}
+	if c == "omp" {
+		provider, id, qualified := strings.Cut(m, "/")
+		if !qualified || id == "" {
+			return "unknown"
+		}
+		switch provider {
+		case "anthropic":
+			return "anthropic"
+		case "openai", "openai-codex":
+			return "openai"
+		case "kiro", "kiro-api-key":
+			return "kiro"
+		case "google", "google-antigravity", "google-gemini-cli":
+			return "google"
+		case "meta", "muse-code":
+			return "meta"
+		default:
+			return "unknown"
+		}
 	}
 	if strings.HasPrefix(m, "kiro-api-key/") || strings.HasPrefix(m, "kiro/") {
 		return "kiro"

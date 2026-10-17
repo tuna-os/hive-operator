@@ -112,6 +112,15 @@ func TestProviderOf(t *testing.T) {
 		{"pi", "kiro/claude-haiku-4-5", "kiro"},
 		{"pi", "[pi] kiro-api-key/claude-opus-5:high", "kiro"},
 		{"muse", "kiro-api-key/claude-opus-5", "meta"}, // CLI first
+		{"omp", "anthropic/claude-sonnet-5", "anthropic"},
+		{"omp", "openai-codex/gpt-5.6-luna", "openai"},
+		{"omp", "kiro/gpt-5.6-luna:max", "kiro"},
+		{"omp", "google-antigravity/claude-opus-5-5", "google"},
+		{"omp", "meta/muse-spark-1.3-contributor", "meta"},
+		{"omp", "muse-code/muse-spark-1.3", "meta"},
+		{"omp", "unconfigured/claude-sonnet-5", "unknown"},
+		{"omp", "claude-sonnet-5", "unknown"},
+		{"omp", "anthropic/", "unknown"},
 		{"bob", "", "ibm"},
 		{"mystery", "", "unknown"},
 	} {

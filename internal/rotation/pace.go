@@ -375,6 +375,10 @@ type FleetAgent struct {
 	// Tier members of the agent's tier, for inferring a pace demotion when
 	// no journal row exists (Shadow, or the first Enforce tick).
 	Members []Rung
+	// Eligible is the full effective ladder for this spoke; Members remains
+	// tier-only and is used solely for legacy demotion inference.
+	Eligible     []Rung
+	MinimumScore string
 }
 
 // PaceConfig holds the actuation knobs (HIVE_PACE_KIRO_* levers).
@@ -502,7 +506,11 @@ func PlanPace(in PaceInput) PacePlan {
 		if p, ok := demoted[key(a)]; ok {
 			j[a.Name] = p
 		}
-		return PaceDemotedFrom(j, cfg.InferDemotions, a.Members, a.Agent)
+		p, ok := PaceDemotedFrom(j, cfg.InferDemotions, a.Members, a.Agent)
+		if ok && !a.allowed(p.Backend, p.Model, a.Effort) {
+			return Placement{}, false
+		}
+		return p, ok
 	}
 	paced := func(a FleetAgent) string {
 		p := usage.ProviderOf(a.CLI, a.Model)
@@ -520,7 +528,7 @@ func PlanPace(in PaceInput) PacePlan {
 	seated, demotable := map[string]int{}, map[string]int{}
 
 	for _, a := range in.Fleet {
-		if a.Paused {
+		if a.Paused || (a.MinimumScore != "" && (a.OnDemand || !a.allowed(a.CLI, a.Model, a.Effort))) {
 			continue
 		}
 		prov := paced(a)
@@ -528,7 +536,7 @@ func PlanPace(in PaceInput) PacePlan {
 			continue
 		}
 		seated[prov]++
-		cheap := RungDown(a.Model)
+		cheap := a.cheaper()
 		if cheap != "" {
 			demotable[prov]++
 		}
@@ -547,7 +555,7 @@ func PlanPace(in PaceInput) PacePlan {
 			}
 			plan.Decisions = append(plan.Decisions, PaceDecision{Namespace: a.Namespace, SetDemoted: &orig,
 				Decision: Decision{Agent: a.Name, Action: ActionDemote, Reason: prov + " hot",
-					From: Placement{prov, a.CLI, a.Model}, To: Placement{prov, a.CLI, cheap}, ToEffort: AgyEffort(a.CLI, cheap),
+					From: Placement{prov, a.CLI, a.Model}, To: Placement{prov, a.CLI, cheap}, ToEffort: a.destinationEffort(a.CLI, cheap),
 					Line: fmt.Sprintf("  demote  %s  %s -> %s  (%s hot)", key(a), a.Model, cheap, prov)}})
 			plan.Lines = append(plan.Lines, plan.Decisions[len(plan.Decisions)-1].Line)
 			demoted[key(a)] = orig
@@ -559,7 +567,7 @@ func PlanPace(in PaceInput) PacePlan {
 			}
 			plan.Decisions = append(plan.Decisions, PaceDecision{Namespace: a.Namespace, ClearDemoted: true,
 				Decision: Decision{Agent: a.Name, Action: ActionRestore, Reason: prov + " cold",
-					From: Placement{prov, a.CLI, a.Model}, To: Placement{df.Provider, df.Backend, df.Model}, ToEffort: AgyEffort(df.Backend, df.Model),
+					From: Placement{prov, a.CLI, a.Model}, To: Placement{df.Provider, df.Backend, df.Model}, ToEffort: a.destinationEffort(df.Backend, df.Model),
 					Line: fmt.Sprintf("  restore %s  %s -> %s  (%s cold)", key(a), a.Model, df.Model, prov)}})
 			plan.Lines = append(plan.Lines, plan.Decisions[len(plan.Decisions)-1].Line)
 			delete(demoted, key(a))
@@ -602,7 +610,7 @@ func planKiro(in PaceInput, plan *PacePlan, demoted map[string]Placement, demote
 	var rows []kiroRow
 	total := 0.0
 	for _, a := range in.Fleet {
-		if a.Paused || usage.ProviderOf(a.CLI, a.Model) != "kiro" {
+		if a.Paused || (a.MinimumScore != "" && (a.OnDemand || !a.allowed(a.CLI, a.Model, a.Effort))) || usage.ProviderOf(a.CLI, a.Model) != "kiro" {
 			continue
 		}
 		r := kiroRow{a, kicksPerHour(a.Cadence), KiroCreditMult(a.Model)}
@@ -625,7 +633,7 @@ func planKiro(in PaceInput, plan *PacePlan, demoted map[string]Placement, demote
 			if in.Pins[key(r.a)] {
 				continue
 			}
-			cheap := RungDown(r.a.Model)
+			cheap := r.a.cheaper()
 			if cheap == "" || r.kph <= 0 || total <= 0 {
 				continue
 			}
@@ -653,7 +661,7 @@ func planKiro(in PaceInput, plan *PacePlan, demoted map[string]Placement, demote
 			}
 			plan.Decisions = append(plan.Decisions, PaceDecision{Namespace: a.Namespace, SetDemoted: &orig,
 				Decision: Decision{Agent: a.Name, Action: ActionDemote, Reason: "kiro over budget",
-					From: Placement{"kiro", a.CLI, a.Model}, To: Placement{"kiro", a.CLI, c.cheap},
+					From: Placement{"kiro", a.CLI, a.Model}, To: Placement{"kiro", a.CLI, c.cheap}, ToEffort: a.destinationEffort(a.CLI, c.cheap),
 					Line: fmt.Sprintf("  kiro-demote %s  %s -> %s  (saves ~%s cr/h; need %s)", key(a), a.Model, c.cheap, c.savS, awkG(need))}})
 			plan.Lines = append(plan.Lines, plan.Decisions[len(plan.Decisions)-1].Line)
 			demoted[key(a)] = orig
@@ -749,7 +757,7 @@ func planKiro(in PaceInput, plan *PacePlan, demoted map[string]Placement, demote
 				continue
 			}
 			up := RungUpToward(df.Model, r.a.Model)
-			if up == "" {
+			if up == "" || !r.a.allowed(df.Backend, up, r.a.Effort) {
 				continue
 			}
 			s := "0"
@@ -775,7 +783,7 @@ func planKiro(in PaceInput, plan *PacePlan, demoted map[string]Placement, demote
 			a := c.r.a
 			d := PaceDecision{Namespace: a.Namespace,
 				Decision: Decision{Agent: a.Name, Action: ActionRestore, Reason: "kiro under budget",
-					From: Placement{"kiro", a.CLI, a.Model}, To: Placement{"kiro", c.df.Backend, c.up},
+					From: Placement{"kiro", a.CLI, a.Model}, To: Placement{"kiro", c.df.Backend, c.up}, ToEffort: a.destinationEffort(c.df.Backend, c.up),
 					Line: fmt.Sprintf("  kiro-promote %s  %s -> %s  (adds ~%s cr/h; kiro under budget)", key(a), a.Model, c.up, c.addS)}}
 			if c.up == c.df.Model {
 				d.ClearDemoted = true

@@ -21,6 +21,7 @@ import (
 
 	hivev1 "github.com/tuna-os/hive-operator/api/v1alpha1"
 	"github.com/tuna-os/hive-operator/internal/metrics"
+	"github.com/tuna-os/hive-operator/internal/rotation"
 )
 
 const ladderController = "modelladder"
@@ -76,6 +77,12 @@ func (r *ModelLadderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			dropped = append(dropped, fmt.Sprintf("%s/%s: incomplete rung", rung.Provider, rung.Model))
 			continue
 		}
+		if !rotation.ScoreMeets(rung.Score, ladder.Spec.MinimumScore) ||
+			(ladder.Spec.MinimumScore != "" && (rotation.ModelEffort(rung.Backend, rung.Model, rung.Effort) == "" ||
+				(rung.Effort != "" && rung.Effort != rotation.ModelEffort(rung.Backend, rung.Model, rung.Effort)))) {
+			dropped = append(dropped, fmt.Sprintf("%s/%s effort=%s: unscored, invalid, implicit or conflicting effort, or below minimumScore %s", rung.Provider, rung.Model, rung.Effort, ladder.Spec.MinimumScore))
+			continue
+		}
 		key := rungIdentity(rung)
 		if seen[key] {
 			continue
@@ -122,7 +129,7 @@ func (r *ModelLadderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 var thinkingRE = regexp.MustCompile(`:(off|minimal|low|medium|high|xhigh|max)$`)
 
 func rungIdentity(rung hivev1.Rung) string {
-	return strings.ToLower(strings.Join([]string{rung.Tier, rung.Provider, rung.Model, rung.Effort}, "\x00"))
+	return strings.ToLower(strings.Join([]string{rung.Tier, rung.Provider, rung.Backend, rung.Model, rung.Effort}, "\x00"))
 }
 
 func (r *ModelLadderReconciler) inventory(ctx context.Context, ladder *hivev1.ModelLadder) (map[string]map[string]bool, error) {

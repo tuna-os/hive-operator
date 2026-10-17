@@ -20,7 +20,7 @@ import (
 func (in Input) Members(tier string) []Rung {
 	var out []Rung
 	for _, r := range in.Rungs {
-		if r.Tier == tier {
+		if r.Tier == tier && r.eligible(in.MinimumScore) {
 			out = append(out, r)
 		}
 	}
@@ -123,8 +123,12 @@ func MismatchRepair(in Input, a Agent, pinned bool) (Rung, bool) {
 	if tier == "" {
 		return Rung{}, false
 	}
+	var s *state
+	if in.MinimumScore != "" {
+		s = newState(in)
+	}
 	for _, r := range in.Members(tier) {
-		if r.Backend == a.CLI {
+		if r.Backend == a.CLI && (in.MinimumScore == "" || s.providerOK(r.Provider, &a, false)) {
 			return r, true
 		}
 	}

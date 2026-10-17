@@ -255,6 +255,10 @@ func Watchdog(in Input) Plan {
 		if !ok {
 			ra = rotation.Agent{Name: a.Name, CLI: a.CLI, Model: a.Model}
 		}
+		if !in.Rotation.PlacementAllowed(ra.CLI, ra.Model, ra.Effort) {
+			add(pf("%-14s held — current placement is outside quality policy; rotation must re-place it", a.Name))
+			continue
+		}
 		// Half-placed pair that cannot launch: put it back on a model its
 		// CURRENT backend runs. Counted as a heal; ends this agent's checks.
 		if budgetOK() {

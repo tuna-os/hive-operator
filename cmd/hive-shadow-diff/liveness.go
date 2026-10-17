@@ -373,7 +373,7 @@ func runLiveLiveness(e *liveEnv, cfg *rest.Config) int {
 		fmt.Printf("== %s (%s) watchdog: operator vs %s (%s ago); /api/status snapshot %s\n", sp.Name, ns, job,
 			e.now.Sub(jobAt).Round(time.Second), ls.snapshot.Format(time.RFC3339))
 		rin := rotation.Input{Now: e.now, Namespace: ns, Agents: ls.rot, Providers: readings, UsageSource: src, Tiers: agentTiers,
-			Rungs: e.ladder, Pins: map[string]bool{}, Holds: map[string]bool{}, Policy: rotation.DefaultPolicy()}
+			Rungs: e.ladder, MinimumScore: e.minimumScore, Pins: map[string]rotation.PinTarget{}, Holds: map[string]bool{}, Policy: rotation.DefaultPolicy()}
 		in := liveness.Input{Now: e.now, Snapshot: ls.snapshot, Agents: ls.agents, LivePane: ls.panes, Pins: map[string]bool{},
 			Rotation: rin, Journal: operatorJournal(e.ctx, cfg, sp.Name), Policy: liveness.DefaultPolicy()}
 		for _, p := range sp.Spec.Pins {
@@ -437,7 +437,7 @@ func runLivenessLive(samplePath string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	e := &liveEnv{ctx: ctx, cs: cs, hive: hiveclient.New(cs, cfg), spokes: spokes, ladder: rungsFrom(ladder), now: time.Now().UTC()}
+	e := &liveEnv{ctx: ctx, cs: cs, hive: hiveclient.New(cs, cfg), spokes: spokes, ladder: rungsFrom(ladder), minimumScore: ladder.Spec.MinimumScore, now: time.Now().UTC()}
 	if err := e.ccleft(); err != nil {
 		fmt.Printf("ccleft unreadable (%v): readings from the ConfigMap\n", err)
 	}

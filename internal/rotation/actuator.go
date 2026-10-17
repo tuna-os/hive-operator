@@ -57,12 +57,12 @@ func PlacementOK(body string) bool {
 	return strings.HasPrefix(st, "updated")
 }
 
-// placement builds the body hive_placement_body sends: backend, model and —
-// for agy only — the reasoning effort its suffixed model requires. Other
-// backends get no effort key ("absent" = leave unchanged).
-func placement(backend, model string) hiveclient.Placement {
+// placement builds an atomic backend/model/effort request. Encoded omp thinking
+// explicitly resets any old effort flag; other empty efforts retain legacy
+// omission so an unrelated placement does not reset a backend's defaults.
+func placement(backend, model, effort string) hiveclient.Placement {
 	p := hiveclient.Placement{Backend: backend, Model: model}
-	if e := AgyEffort(backend, model); e != "" {
+	if e := placementEffort(backend, model, effort); e != "" || (backend == "omp" && ModelEffort(backend, model, "") != "") {
 		p.ReasoningEffort = &e
 	}
 	return p
@@ -90,12 +90,12 @@ func (h *HiveActuator) post(ctx context.Context, ns, path string, want ...string
 }
 
 // Place performs one atomic placement and checks the confirmation.
-func (h *HiveActuator) Place(ctx context.Context, ns, agent, backend, model string) error {
+func (h *HiveActuator) Place(ctx context.Context, ns, agent, backend, model, effort string) error {
 	if backend == "" || model == "" {
 		// Never write a blank: an empty backend/model unseats a working agent.
 		return fmt.Errorf("refusing to place %s with empty backend/model", agent)
 	}
-	out, err := h.API.Place(ctx, ns, agent, placement(backend, model))
+	out, err := h.API.Place(ctx, ns, agent, placement(backend, model, effort))
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func (h *HiveActuator) Apply(ctx context.Context, ns string, d Decision) error {
 	a := url.PathEscape(d.Agent)
 	switch d.Action {
 	case ActionMove, ActionCanary, ActionDemote, ActionRestore:
-		if err := h.Place(ctx, ns, d.Agent, d.To.Backend, d.To.Model); err != nil {
+		if err := h.Place(ctx, ns, d.Agent, d.To.Backend, d.To.Model, d.ToEffort); err != nil {
 			return err
 		}
 		if d.ResumeAfter {

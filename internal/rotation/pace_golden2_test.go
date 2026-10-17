@@ -46,7 +46,7 @@ func TestGoldenPaceKiroDemotion20261001T1445(t *testing.T) {
 // GOLDEN: the school rotate at 15:00Z, after that pace tick — guide now
 // reads as pace-demoted (inferred) and stays put.
 func TestGoldenSchool20261001T1500(t *testing.T) {
-	in := liveInput(t, "school", "hive", true, set("supervisor"), set("reviewer"), time.Date(2026, 10, 1, 15, 0, 3, 0, time.UTC))
+	in := liveInput(t, "school", "hive", true, pinset("supervisor"), set("reviewer"), time.Date(2026, 10, 1, 15, 0, 3, 0, time.UTC))
 	in.Agents = loadStatus(t, "testdata/status-school-20261001T1501.json")
 	want, wantContrib := bashPlan(t, "testdata/hive-rotate-school-20261001T1500.log")
 	diffLines(t, Compute(in).Lines(false), want)
