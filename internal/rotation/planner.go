@@ -90,6 +90,7 @@ type Reading struct {
 // Rung is one tier member, in preference order.
 type Rung struct {
 	Tier, Provider, Backend, Model string
+	Effort, Score                  string
 }
 
 // Policy holds the tunables, defaulted to hive-rotate.sh's values.
@@ -142,6 +143,21 @@ type Placement struct {
 	Provider, Backend, Model string
 }
 
+// PinTarget is one HiveSpoke pin: the agent plus its intended backend/model.
+// An empty Backend or Model means protect-only — rotation leaves the
+// placement alone, exactly like HIVE_ROTATE_PIN. Both set means prescriptive:
+// rotation converges the agent onto the pair (see step 3).
+type PinTarget struct {
+	Backend, Model string
+}
+
+// Prescriptive reports whether the pin names a destination to converge onto.
+// A half pin (only one of backend/model) is protect-only: converging onto a
+// half-specified pair could unseat a working agent for a guess.
+func (p PinTarget) Prescriptive() bool {
+	return p.Backend != "" && p.Model != ""
+}
+
 // KiroEvict is one hive-pace cap request: move this agent off Kiro, onto
 // one of Targets, before Expiry.
 type KiroEvict struct {
@@ -167,7 +183,13 @@ type Input struct {
 	Tiers map[string]string
 	// Rungs is tier_members for every tier, in preference order.
 	Rungs []Rung
-	Pins  map[string]bool
+	// MinimumScore gates every placement through the scored effective ladder.
+	MinimumScore string
+	// PaceBlocked prevents quality correction from bypassing hot/over-budget pools.
+	PaceBlocked map[string]bool
+	// Pins fixes agents' placements. A pin without backend/model is
+	// protect-only; a pin naming both converges the agent onto the pair.
+	Pins  map[string]PinTarget
 	Holds map[string]bool
 	// PeakPaused: agents hive-peak paused for a peak window (declared holds).
 	PeakPaused map[string]bool
@@ -313,6 +335,9 @@ func (s *state) providerOf(a *Agent) string { return usage.ProviderOf(a.CLI, a.M
 
 // providerOK ports provider_ok: may agent a be moved ONTO provider p?
 func (s *state) providerOK(p string, a *Agent, allowSub bool) bool {
+	if s.in.MinimumScore != "" && s.in.PaceBlocked[p] {
+		return false
+	}
 	if s.loginBlocked[p] || s.exhausted(p) {
 		return false
 	}
@@ -356,7 +381,7 @@ func (s *state) notePlacement(p string, a *Agent) {
 func (s *state) members(tier string) []Rung {
 	var out []Rung
 	for _, r := range s.in.Rungs {
-		if r.Tier == tier {
+		if r.Tier == tier && r.eligible(s.in.MinimumScore) {
 			out = append(out, r)
 		}
 	}
@@ -570,6 +595,12 @@ func Compute(in Input) Plan {
 	sort.Strings(stranded)
 	for _, a := range stranded {
 		row := in.Stranded[a]
+		current := s.byName[a]
+		if in.MinimumScore != "" && (current == nil || current.OnDemand || in.Holds[a] ||
+			(current != nil && in.PaceBlocked[s.providerOf(current)]) ||
+			!in.PlacementAllowed(current.CLI, current.Model, current.Effort)) {
+			continue
+		}
 		if !s.recovered(row.Provider) {
 			continue
 		}
@@ -589,6 +620,9 @@ func Compute(in Input) Plan {
 				continue
 			}
 			ours := strandedNow(a.Name)
+			if in.MinimumScore != "" && (in.Holds[a.Name] || in.PaceBlocked[s.providerOf(a)] || !in.PlacementAllowed(a.CLI, a.Model, a.Effort)) {
+				continue
+			}
 			if a.PausedTrigger == "dashboard-api" && !ours {
 				switch {
 				case in.Holds[a.Name]:
@@ -627,13 +661,53 @@ func Compute(in Input) Plan {
 		a := &in.Agents[i]
 		curp := s.providerOf(a)
 		cur := Placement{curp, a.CLI, a.Model}
-		if in.Pins[a.Name] {
+		if in.MinimumScore != "" && (in.Holds[a.Name] || a.OnDemand || (a.Paused && !strandedNow(a.Name) && a.PausedTrigger != "login-detector")) {
+			add(Decision{Agent: a.Name, Action: ActionHold, From: cur, Reason: "quality policy preserves hold/on-demand/pause",
+				Line: line("%-14s held — quality policy does not activate paused or on-demand agents", a.Name)})
+			continue
+		}
+		if pin, ok := in.Pins[a.Name]; ok {
+			if pin.Prescriptive() && (a.CLI != pin.Backend || a.Model != pin.Model) {
+				// Prescriptive pin: converge onto the pinned pair. This is
+				// how an operator disables a backend declaratively — e.g.
+				// pin reviewer off copilot — without touching the ladder.
+				// Same resume rule as a ladder move: only agents we paused
+				// (stranded or login-detector) resume after.
+				to := Placement{usage.ProviderOf(pin.Backend, pin.Model), pin.Backend, pin.Model}
+				if !in.PlacementAllowed(pin.Backend, pin.Model, placementEffort(pin.Backend, pin.Model, a.Effort)) ||
+					(in.MinimumScore != "" && !s.providerOK(to.Provider, a, false)) {
+					add(Decision{Agent: a.Name, Action: ActionHold, From: cur, Reason: "pin is outside quality policy",
+						Line: line("%-14s held — pinned destination is outside quality policy", a.Name)})
+					continue
+				}
+				s.notePlacement(to.Provider, a)
+				wasStranded := strandedNow(a.Name)
+				plan.Changes++
+				add(Decision{Agent: a.Name, Action: ActionMove, From: cur, To: to,
+					ToEffort: AgyEffort(pin.Backend, pin.Model), Reason: "pinned in HiveSpoke",
+					ResumeAfter:  a.Paused && (a.PausedTrigger == "login-detector" || wasStranded),
+					ClearsStrand: wasStranded,
+					Line: line("%-14s %-9s %s  ->  %-9s %s (pinned in HiveSpoke)", a.Name, curp, a.Model,
+						to.Provider, pin.Model)})
+				continue
+			}
+			if !in.PlacementAllowed(a.CLI, a.Model, a.Effort) {
+				add(Decision{Agent: a.Name, Action: ActionHold, From: cur, Reason: "pinned placement is outside quality policy",
+					Line: line("%-14s held — pinned placement requires an explicit quality-policy update", a.Name)})
+				continue
+			}
 			add(Decision{Agent: a.Name, Action: ActionPin, From: cur, Reason: "pinned",
 				Line: line("%-14s %-9s pinned by HIVE_ROTATE_PIN — placement left alone", a.Name, curp)})
 			continue
 		}
 		tier := in.Tiers[a.Name]
 		if tier == "" {
+			if !in.PlacementAllowed(a.CLI, a.Model, a.Effort) {
+				plan.Changes++
+				add(Decision{Agent: a.Name, Action: ActionStrand, From: cur, Reason: "quality policy: no configured tier",
+					SkipActuation: a.Paused, RecordsStrand: !a.Paused,
+					Line: line("%-14s STRANDED — no configured tier supplies eligible capacity", a.Name)})
+			}
 			continue
 		}
 		demoted, isDemoted := PaceDemotedFrom(in.PaceDemoted, pol.InferPaceDemotion, s.members(tier), *a)
@@ -647,7 +721,7 @@ func Compute(in Input) Plan {
 					plan.Changes++
 					add(Decision{Agent: a.Name, Action: ActionMove, From: cur,
 						To:       Placement{want.Provider, want.Backend, want.Model},
-						ToEffort: AgyEffort(want.Backend, want.Model), Reason: "kiro budget cap, hive-pace",
+						ToEffort: want.PlacementEffort(), Reason: "kiro budget cap, hive-pace",
 						Line: line("%-14s %-9s %s  ->  %-9s %s  (kiro budget cap, hive-pace)", a.Name, curp, a.Model, want.Provider, want.Model)})
 					continue
 				}
@@ -662,7 +736,7 @@ func Compute(in Input) Plan {
 		// Stickiness: a failover system, not an optimiser. Only POSITIVE
 		// exhaustion (or a login-blocked provider) moves anyone; a rung the
 		// pacer demoted this agent onto counts as in-tier.
-		if !kiroEvict && !s.exhausted(curp) && !s.loginBlocked[curp] &&
+		if in.PlacementAllowed(a.CLI, a.Model, a.Effort) && !kiroEvict && !s.exhausted(curp) && !s.loginBlocked[curp] &&
 			(s.inTier(tier, a.CLI, a.Model) || (isDemoted && s.inTier(tier, demoted.Backend, demoted.Model))) {
 			s.notePlacement(curp, a)
 			suffix := ""
@@ -675,12 +749,16 @@ func Compute(in Input) Plan {
 		}
 		want, ok := s.chooseRung(tier, a, nil)
 		if !ok {
-			if s.exhausted(curp) {
+			if s.exhausted(curp) || !in.PlacementAllowed(a.CLI, a.Model, a.Effort) {
 				// Pausing is honest degradation; bash pauses (and journals)
 				// only an agent that is not already paused.
 				plan.Changes++
+				reason := fmt.Sprintf("%s exhausted and no rung at %s", curp, tier)
+				if !in.PlacementAllowed(a.CLI, a.Model, a.Effort) {
+					reason = "quality policy: no eligible capacity at " + tier
+				}
 				add(Decision{Agent: a.Name, Action: ActionStrand, From: cur,
-					Reason:        fmt.Sprintf("%s exhausted and no rung at %s", curp, tier),
+					Reason:        reason,
 					SkipActuation: a.Paused, RecordsStrand: !a.Paused,
 					Line: line("%-14s %-9s STRANDED (no rung at %s) -> pausing", a.Name, curp, tier)})
 			} else {
@@ -691,7 +769,7 @@ func Compute(in Input) Plan {
 		}
 		s.notePlacement(want.Provider, a)
 		to := Placement{want.Provider, want.Backend, want.Model}
-		if want.Backend == a.CLI && want.Model == a.Model {
+		if want.Backend == a.CLI && want.Model == a.Model && (in.MinimumScore == "" || want.EffortValue() == ModelEffort(a.CLI, a.Model, a.Effort)) {
 			add(Decision{Agent: a.Name, Action: ActionKeep, From: cur, To: to, Reason: "already best",
 				Line: line("%-14s %-9s %s ok", a.Name, curp, a.Model)})
 			continue
@@ -706,7 +784,7 @@ func Compute(in Input) Plan {
 			reason = fmt.Sprintf("cadence %s is under the kiro minimum", a.Cadence)
 		}
 		wasStranded := strandedNow(a.Name)
-		d := Decision{Agent: a.Name, Action: ActionMove, From: cur, To: to, ToEffort: AgyEffort(want.Backend, want.Model),
+		d := Decision{Agent: a.Name, Action: ActionMove, From: cur, To: to, ToEffort: want.PlacementEffort(),
 			Reason:       reason,
 			ResumeAfter:  a.Paused && (a.PausedTrigger == "login-detector" || wasStranded),
 			ClearsStrand: wasStranded,
@@ -750,7 +828,7 @@ func Compute(in Input) Plan {
 			add(Decision{Agent: a.Name, Action: ActionCanary,
 				From:     Placement{s.providerOf(a), a.CLI, a.Model},
 				To:       Placement{p, r.Backend, r.Model},
-				ToEffort: AgyEffort(r.Backend, r.Model), Reason: "probe visibility",
+				ToEffort: r.PlacementEffort(), Reason: "probe visibility",
 				Line: line("%-14s %-9s canary -> %-9s %s (probe visibility)", a.Name,
 					usage.ProviderOf(r.Backend, r.Model), r.Backend, r.Model)})
 		}
@@ -775,7 +853,10 @@ func (s *state) canaryEligible(p string) *Agent {
 	bestC := -1
 	for i := range s.in.Agents {
 		a := &s.in.Agents[i]
-		if a.Paused {
+		if s.in.MinimumScore != "" && !s.providerOK(p, a, false) {
+			continue
+		}
+		if a.Paused || (s.in.MinimumScore != "" && (a.OnDemand || s.in.Holds[a.Name] || hasPin(s.in.Pins, a.Name))) {
 			continue
 		}
 		tier := s.in.Tiers[a.Name]

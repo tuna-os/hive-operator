@@ -275,12 +275,16 @@ func (r *HiveSpokeReconciler) watchdogPass(ctx context.Context, sp *hivev1.HiveS
 	var ladder hivev1.ModelLadder
 	if err := r.Get(ctx, client.ObjectKey{Name: ladderName}, &ladder); err == nil {
 		rungs = ladderRungs(ladder.Status.Effective)
+	} else if client.IgnoreNotFound(err) != nil {
+		ladder.Spec.MinimumScore = "unavailable"
 	}
 	rotMode := sp.Spec.RotationMode
 	if rotMode == "" {
 		rotMode = hivev1.ModeShadow
 	}
 	rin := buildRotationInput(sp, li.readings, li.sources, rungs, now, rotMode)
+	rin.MinimumScore = ladder.Spec.MinimumScore
+	r.qualityBudgetBlocks(ctx, &rin)
 
 	in := liveness.Input{Now: now, Snapshot: li.snapshot, Agents: li.agents, LivePane: map[string]string{},
 		Pins: map[string]bool{}, Rotation: rin, Journal: journalFromStatus(st.Journal), Policy: pol}
@@ -418,7 +422,7 @@ func (r *HiveSpokeReconciler) applyLiveness(ctx context.Context, sp *hivev1.Hive
 		sp.Status.RotationAppliedAt = nil
 		return nil, true, nil
 	case liveness.KindRepair:
-		if err := act.Place(ctx, ns, a.Agent, a.To.Backend, a.To.Model); err != nil {
+		if err := act.Place(ctx, ns, a.Agent, a.To.Backend, a.To.Model, a.To.Effort); err != nil {
 			return []string{"    ! placement failed: " + trunc(err.Error(), 200), "    ! repair failed"}, false, err
 		}
 		return nil, true, nil
@@ -434,7 +438,7 @@ func (r *HiveSpokeReconciler) applyLiveness(ctx context.Context, sp *hivev1.Hive
 		return []string{"    ! effort set failed: " + rs}, false, fmt.Errorf("effort set: %s", rs)
 	case liveness.KindRotateOff:
 		if rotationEnforced {
-			if err := act.Place(ctx, ns, a.Agent, a.To.Backend, a.To.Model); err == nil {
+			if err := act.Place(ctx, ns, a.Agent, a.To.Backend, a.To.Model, a.To.Effort); err == nil {
 				return nil, true, nil
 			} else {
 				out, _, rerr := restart()
@@ -476,6 +480,20 @@ func (r *HiveSpokeReconciler) nudgePass(ctx context.Context, sp *hivev1.HiveSpok
 	st := sp.Status.Liveness
 	in := liveness.NudgeInput{Namespace: sp.Spec.Namespace, Agents: li.nudge, Idle: li.ages, Policy: pol,
 		BudgetExhausted: sp.Status.BudgetExhausted}
+	minimum, eligible := spokeQuality(ctx, r.Client, sp)
+	if minimum != "" {
+		quality := rotation.Input{MinimumScore: minimum, Rungs: eligible}
+		allowed := map[string]bool{}
+		for _, a := range sp.Status.Agents {
+			allowed[a.Name] = quality.PlacementAllowed(a.Backend, a.Model, a.Effort)
+		}
+		in.Agents = append([]liveness.NudgeAgent(nil), in.Agents...)
+		for i := range in.Agents {
+			if !allowed[in.Agents[i].Name] {
+				in.Agents[i].Paused = true
+			}
+		}
+	}
 	in.BudgetPctUsed, _ = numFrom(li.budget, "BUDGET_PCT_USED")
 	in.BudgetWeekly, _ = numFrom(li.budget, "BUDGET_WEEKLY")
 	if api == nil {

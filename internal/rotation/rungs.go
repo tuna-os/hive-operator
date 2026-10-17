@@ -77,11 +77,11 @@ func demotedFrom(original, current string) bool {
 // KiroCreditMult ports kiro_credit_mult: Kiro credits per request.
 func KiroCreditMult(model string) float64 {
 	switch {
-	case strings.Contains(model, "gpt-5-6-sol"):
+	case strings.Contains(model, "gpt-5-6-sol") || strings.Contains(model, "gpt-5.6-sol"):
 		return 4.4
-	case strings.Contains(model, "gpt-5-6-terra"):
+	case strings.Contains(model, "gpt-5-6-terra") || strings.Contains(model, "gpt-5.6-terra"):
 		return 2.2
-	case strings.Contains(model, "gpt-5-6-luna"):
+	case strings.Contains(model, "gpt-5-6-luna") || strings.Contains(model, "gpt-5.6-luna"):
 		return 1.1
 	case strings.Contains(model, "claude-opus-"):
 		return 2.2

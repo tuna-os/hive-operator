@@ -18,7 +18,7 @@ import (
 // kiro-api-key/…:<thinking>) took its place.
 func bashTiers() []Rung {
 	var out []Rung
-	add := func(tier, p, b, m string) { out = append(out, Rung{tier, p, b, m}) }
+	add := func(tier, p, b, m string) { out = append(out, Rung{Tier: tier, Provider: p, Backend: b, Model: m}) }
 	add("T1", "google", "agy", "gemini-3.8-flash-high")
 	add("T1", "kiro", "pi", "kiro-api-key/claude-opus-5:high")
 	add("T1", "kiro", "pi", "kiro-api-key/gpt-5-6-sol:high")
@@ -136,7 +136,15 @@ func set(xs ...string) map[string]bool {
 	return m
 }
 
-func liveInput(t *testing.T, spoke, ns string, primary bool, pins, holds map[string]bool, now time.Time) Input {
+func pinset(xs ...string) map[string]PinTarget {
+	m := map[string]PinTarget{}
+	for _, x := range xs {
+		m[x] = PinTarget{}
+	}
+	return m
+}
+
+func liveInput(t *testing.T, spoke, ns string, primary bool, pins map[string]PinTarget, holds map[string]bool, now time.Time) Input {
 	return Input{Now: now, Namespace: ns, Primary: primary, Agents: loadStatus(t, "testdata/status-"+spoke+"-20261001.json"),
 		Providers: readings20261001(), UsageSource: "ccleft", Tiers: fleetTiers, Rungs: bashTiers(),
 		Pins: pins, Holds: holds, Policy: DefaultPolicy()}
@@ -158,7 +166,7 @@ func diffLines(t *testing.T, got, want []string) {
 // inferred — every "(pace-demoted from …)" suffix below is bash reading its
 // journal file, which the operator never sees in Shadow.
 func TestGoldenSchool20261001(t *testing.T) {
-	in := liveInput(t, "school", "hive", true, set("supervisor"), set("reviewer"),
+	in := liveInput(t, "school", "hive", true, pinset("supervisor"), set("reviewer"),
 		time.Date(2026, 10, 1, 14, 20, 3, 0, time.UTC))
 	want, wantContrib := bashPlan(t, "testdata/hive-rotate-school-20261001T1420.log")
 	diffLines(t, Compute(in).Lines(false), want)
@@ -456,7 +464,7 @@ func TestPinsHoldsAndAutoResume(t *testing.T) {
 		{Name: "brainstorm", CLI: "agy", Model: "gemini-3.8-flash-low", Paused: true, PausedTrigger: "startup", OnDemand: true},
 	}
 	in := mkIn(agents, r)
-	in.Pins, in.Holds = set("supervisor"), set("reviewer")
+	in.Pins, in.Holds = pinset("supervisor"), set("reviewer")
 	got := Compute(in).Lines(true)
 	want := []string{
 		"reviewer       operator  held paused by HIVE_ROTATE_HOLD (declared in git)",
@@ -485,6 +493,54 @@ func TestPinsHoldsAndAutoResume(t *testing.T) {
 	in.Policy.AutoResume = false
 	if strings.Contains(strings.Join(Compute(in).Lines(true), "\n"), "resuming") {
 		t.Fatal("HIVE_ROTATE_AUTORESUME=0 must hold every pause")
+	}
+}
+
+// Prescriptive pins: a pin naming backend+model converges a drifted agent
+// onto the pair — the declarative way to disable a backend (pin reviewer
+// off copilot) — while a pin already on the pair, or naming nothing,
+// leaves the placement alone.
+func TestPrescriptivePins(t *testing.T) {
+	r := healthy()
+	agents := []Agent{
+		{Name: "reviewer", CLI: "copilot", Model: "claude-fable-5", Cadence: "30m"},
+		{Name: "adjudicator", CLI: "codex", Model: "gpt-6-sol", Cadence: "30m"},
+		{Name: "supervisor", CLI: "agy", Model: "gemini-3.8-flash-medium", Cadence: "5m"},
+		{Name: "guide", CLI: "copilot", Model: "claude-fable-5", Cadence: "4h"},
+	}
+	in := mkIn(agents, r)
+	in.Pins = map[string]PinTarget{
+		"reviewer":    {Backend: "agy", Model: "gemini-3.8-flash-medium"},
+		"adjudicator": {Backend: "codex", Model: "gpt-6-sol"},
+		"supervisor":  {},
+		"guide":       {Backend: "agy"},
+	}
+	p := Compute(in)
+	d := decisionFor(p, "reviewer")
+	if d.Action != ActionMove || d.To != (Placement{"google", "agy", "gemini-3.8-flash-medium"}) ||
+		d.ToEffort != "medium" || d.Reason != "pinned in HiveSpoke" || d.ResumeAfter {
+		t.Fatalf("drifted pinned agent must move onto the pin: %+v", d)
+	}
+	if !strings.Contains(d.Line, "(pinned in HiveSpoke)") {
+		t.Fatalf("pin move line must say so: %q", d.Line)
+	}
+	// Already on the pinned pair: left alone, no change.
+	d = decisionFor(p, "adjudicator")
+	if d.Action != ActionPin || d.Reason != "pinned" {
+		t.Fatalf("agent already on its pin must be left alone: %+v", d)
+	}
+	// Agent-only pin: protect-only, even off-ladder on copilot.
+	d = decisionFor(p, "supervisor")
+	if d.Action != ActionPin {
+		t.Fatalf("agent-only pin must be protect-only: %+v", d)
+	}
+	// Half pin (backend without model): protect-only, never a guessed move.
+	d = decisionFor(p, "guide")
+	if d.Action != ActionPin {
+		t.Fatalf("half pin must be protect-only: %+v", d)
+	}
+	if p.Changes != 1 {
+		t.Fatalf("only the drifted pin converges: %d changes", p.Changes)
 	}
 }
 

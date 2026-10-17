@@ -329,9 +329,11 @@ func (r *HiveSpokeReconciler) pace(ctx context.Context, sp *hivev1.HiveSpoke, mo
 		}
 		tiers := spokeTiers(s)
 		enforce := spokeMode(s) == hivev1.ModeEnforce
+		minimum, eligible := spokeQuality(ctx, r.Client, s)
 		for _, a := range s.Status.Agents {
 			fa := rotation.FleetAgent{Namespace: s.Spec.Namespace, Agent: rotation.Agent{Name: a.Name, CLI: a.Backend, Model: a.Model,
 				Effort: a.Effort, Paused: a.Paused, OnDemand: a.OnDemand, PausedTrigger: a.PausedTrigger, Cadence: a.Cadence}}
+			fa.MinimumScore, fa.Eligible = minimum, eligible
 			// Inference stands in for bash's journal on Shadow spokes only;
 			// an Enforce spoke's journal is authoritative ("restore only
 			// own demotions"). No members = no inference.
@@ -346,6 +348,11 @@ func (r *HiveSpokeReconciler) pace(ctx context.Context, sp *hivev1.HiveSpoke, mo
 		}
 		for _, p := range s.Spec.Pins {
 			in.Pins[s.Spec.Namespace+"/"+p.Agent] = true
+		}
+		if minimum != "" {
+			for _, h := range s.Spec.Holds {
+				in.Pins[s.Spec.Namespace+"/"+h] = true
+			}
 		}
 		if j := s.Status.Journal; j != nil {
 			for _, row := range j.PaceDemoted {

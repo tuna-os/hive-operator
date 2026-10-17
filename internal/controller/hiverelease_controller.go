@@ -30,6 +30,7 @@ import (
 	"github.com/tuna-os/hive-operator/internal/hiveclient"
 	"github.com/tuna-os/hive-operator/internal/metrics"
 	"github.com/tuna-os/hive-operator/internal/registry"
+	"github.com/tuna-os/hive-operator/internal/rotation"
 )
 
 const releaseController = "hiverelease"
@@ -977,7 +978,7 @@ func (r *HiveReleaseReconciler) stepRolling(ctx context.Context, hr *hivev1.Hive
 	}
 	g := r.gate(ctx, p, -1)
 	if g.ok && p.t.spoke {
-		restored, lost, rerr := r.restorePlacements(ctx, p, g.pod, rp.Snapshot, g.agents)
+		restored, lost, held, rerr := r.restorePlacements(ctx, p, g.pod, rp.Snapshot, g.agents)
 		switch {
 		case len(lost) > 0:
 			g.ok, g.msg = false, "agents lost after the image change: "+strings.Join(lost, ", ")
@@ -988,6 +989,10 @@ func (r *HiveReleaseReconciler) stepRolling(ctx context.Context, hr *hivev1.Hive
 			ts.PlacementsRestored = appendUnique(ts.PlacementsRestored, restored...)
 			metrics.Action(releaseController, hr.Name, "restore-placement", rerr == nil)
 			r.event(hr, corev1.EventTypeWarning, "PlacementsRestored", "%s: image change reset placements; re-applied %s", ts.Name, strings.Join(restored, ", "))
+		}
+		if len(held) > 0 {
+			g.msg += "; snapshot restore held by quality policy: " + strings.Join(held, ", ")
+			r.event(hr, corev1.EventTypeWarning, "PlacementRestoreHeld", "%s: %s", ts.Name, strings.Join(held, ", "))
 		}
 	}
 	if g.ok {
@@ -1171,10 +1176,13 @@ func (r *HiveReleaseReconciler) stepRollingBack(ctx context.Context, hr *hivev1.
 	if done, detail := rolloutDone(p.dep); done {
 		g = r.gate(ctx, p, -1)
 		if g.ok && p.t.spoke {
-			restored, _, rerr := r.restorePlacements(ctx, p, g.pod, rp.Snapshot, g.agents)
+			restored, _, held, rerr := r.restorePlacements(ctx, p, g.pod, rp.Snapshot, g.agents)
 			if len(restored) > 0 {
 				ts.PlacementsRestored = appendUnique(ts.PlacementsRestored, restored...)
 				r.event(hr, corev1.EventTypeWarning, "PlacementsRestored", "%s: rollback reset placements; re-applied %s", ts.Name, strings.Join(restored, ", "))
+			}
+			if len(held) > 0 {
+				r.event(hr, corev1.EventTypeWarning, "PlacementRestoreHeld", "%s: rollback snapshot held: %s", ts.Name, strings.Join(held, ", "))
 			}
 			if rerr != nil {
 				g.ok, g.msg = false, "could not restore placements: "+rerr.Error()
@@ -1356,19 +1364,32 @@ func lostAgents(before, after []hivev1.AgentPlacementSnapshot) []string {
 // but not changed: on-demand agents come back paused by design, and resuming
 // one would spend budget nobody asked for.
 func (r *HiveReleaseReconciler) restorePlacements(ctx context.Context, p plan, pod *corev1.Pod,
-	before, after []hivev1.AgentPlacementSnapshot) (restored, lost []string, err error) {
+	before, after []hivev1.AgentPlacementSnapshot) (restored, lost, held []string, err error) {
 	lost = lostAgents(before, after)
 	now := map[string]hivev1.AgentPlacementSnapshot{}
 	for _, a := range after {
 		now[a.Name] = a
 	}
 	var errs []string
+	var quality rotation.Input
+	if p.t.spec.Spoke != "" {
+		var sp hivev1.HiveSpoke
+		if err := r.Get(ctx, client.ObjectKey{Name: p.t.spec.Spoke}, &sp); err != nil {
+			quality.MinimumScore = "unavailable"
+		} else {
+			quality.MinimumScore, quality.Rungs = spokeQuality(ctx, r.Client, &sp)
+		}
+	}
 	for _, b := range before {
 		a, ok := now[b.Name]
 		if !ok {
 			continue
 		}
 		if a.Backend == b.Backend && a.Model == b.Model && a.Effort == b.Effort {
+			continue
+		}
+		if !quality.PlacementAllowed(b.Backend, b.Model, b.Effort) {
+			held = append(held, fmt.Sprintf("%s (snapshot outside quality policy; keeping current %s/%s, rotation re-evaluates)", b.Name, a.Backend, a.Model))
 			continue
 		}
 		pl := hiveclient.Placement{Backend: b.Backend, Model: b.Model}
@@ -1385,7 +1406,7 @@ func (r *HiveReleaseReconciler) restorePlacements(ctx context.Context, p plan, p
 	if len(errs) > 0 {
 		err = errors.New(strings.Join(errs, "; "))
 	}
-	return restored, lost, err
+	return restored, lost, held, err
 }
 
 // ── wiring ──────────────────────────────────────────────────────────────────
