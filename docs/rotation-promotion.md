@@ -54,11 +54,16 @@ re-evaluate rather than falsely failing or rolling back an otherwise healthy
 release. Non-spoke release targets have no ModelLadder policy.
 
 For agy, `-high`/`-medium`/`-low` requires the matching explicit launch effort;
-for pi, `:thinking` is launch syntax and authoritative. Other backends use
-the explicit rung effort. Scored placement carries explicit effort in the same
-atomic placement request, so a max-effort score cannot authorize an unknown or
-lower-effort launch. Backend/provider routing and authentication remain deployment
-prerequisites; adding a scored rung alone does not add a new backend.
+for pi, `:thinking` is launch syntax and authoritative. For omp, use selectors
+such as `google-antigravity/gemini-3.8-flash:high` or
+`anthropic/claude-sonnet-5:max`: placement atomically clears the separate
+`reasoning_effort` flag so it cannot override the encoded thinking level.
+Conflicting declared rung efforts fail closed. Encoded selectors also preserve
+Anthropic's trailing `-5` through the current Hive model normalizer and do not
+depend on the dashboard's potentially stale per-model thinking catalog.
+Other backends carry explicit effort in the same atomic placement request.
+Backend/provider routing and authentication remain deployment prerequisites;
+adding a scored rung alone does not add a new backend.
 
 
 ## What moves, what stays

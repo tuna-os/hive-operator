@@ -180,3 +180,20 @@ func TestQualityRotationRepairsActualAgyEffortDrift(t *testing.T) {
 		t.Fatalf("model suffix must not hide actual effort drift: %+v", p)
 	}
 }
+
+func TestQualityOmpEncodedEffortClearsOverridesAndStaysStable(t *testing.T) {
+	in := qualityInput()
+	in.Agents[0] = Agent{Name: "guide", CLI: "omp", Model: "google-antigravity/gemini-3.8-flash:high", Effort: "low", Cadence: "1h"}
+	in.Rungs[0] = Rung{Tier: "T2", Provider: "google", Backend: "omp", Model: "google-antigravity/gemini-3.8-flash:high", Effort: "high", Score: "40.2"}
+	if p := Compute(in); len(p.Decisions) != 1 || p.Decisions[0].Action != ActionMove || p.Decisions[0].ToEffort != "" {
+		t.Fatalf("encoded thinking must clear the stale overriding CLI flag: %+v", p)
+	}
+	in.Agents[0].Effort = ""
+	if p := Compute(in); len(p.Decisions) != 1 || p.Decisions[0].Action != ActionKeep {
+		t.Fatalf("correct encoded effort must not cause repeated corrective restarts: %+v", p)
+	}
+	in.Rungs[0].Effort = "low"
+	if p := Compute(in); len(p.Decisions) != 1 || p.Decisions[0].Action != ActionStrand {
+		t.Fatalf("conflicting encoded and declared scored effort must fail closed: %+v", p)
+	}
+}

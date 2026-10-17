@@ -57,12 +57,12 @@ func PlacementOK(body string) bool {
 	return strings.HasPrefix(st, "updated")
 }
 
-// placement builds an atomic backend/model/effort request. Empty explicit
-// effort preserves the legacy agy suffix behavior and otherwise leaves effort
-// unchanged; a scored destination carries its exact effort.
+// placement builds an atomic backend/model/effort request. Encoded omp thinking
+// explicitly resets any old effort flag; other empty efforts retain legacy
+// omission so an unrelated placement does not reset a backend's defaults.
 func placement(backend, model, effort string) hiveclient.Placement {
 	p := hiveclient.Placement{Backend: backend, Model: model}
-	if e := placementEffort(backend, model, effort); e != "" {
+	if e := placementEffort(backend, model, effort); e != "" || (backend == "omp" && ModelEffort(backend, model, "") != "") {
 		p.ReasoningEffort = &e
 	}
 	return p

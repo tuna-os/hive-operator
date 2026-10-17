@@ -20,13 +20,13 @@ func ScoreMeets(score, minimum string) bool {
 	return err == nil && !math.IsNaN(value) && !math.IsInf(value, 0) && value >= floor
 }
 
-// ModelEffort follows launch syntax: agy's model suffix and pi's :thinking
-// suffix take precedence; other backends use the explicit effort field.
+// ModelEffort resolves a rung's launch syntax. Agy's suffix and pi/omp's
+// :thinking carry the desired effort; observedEffort handles overriding flags.
 func ModelEffort(backend, model, effort string) string {
 	if e := AgyEffort(backend, model); e != "" {
 		return e
 	}
-	if backend == "pi" {
+	if backend == "pi" || backend == "omp" {
 		if _, e, ok := strings.Cut(model, ":"); ok && contains([]string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}, e) {
 			return e
 		}
@@ -37,13 +37,18 @@ func ModelEffort(backend, model, effort string) string {
 // EffortValue returns the launch effort encoded by this exact rung.
 func (r Rung) EffortValue() string { return ModelEffort(r.Backend, r.Model, r.Effort) }
 
-// PlacementEffort omits pi's redundant :thinking effort key while retaining
-// explicit effort for backends whose model IDs do not encode it.
+// PlacementEffort preserves legacy launch behavior, but clears an omp effort
+// flag when the selector already carries the same thinking level.
 func (r Rung) PlacementEffort() string {
 	return placementEffort(r.Backend, r.Model, r.Effort)
 }
 
 func placementEffort(backend, model, effort string) string {
+	if backend == "omp" {
+		if encoded := ModelEffort(backend, model, ""); encoded != "" && (effort == "" || effort == encoded) {
+			return ""
+		}
+	}
 	if e := AgyEffort(backend, model); e != "" {
 		return e
 	}
@@ -62,7 +67,7 @@ func (r Rung) eligible(minimum string) bool {
 }
 
 func observedEffort(backend, model, effort string) string {
-	if backend == "pi" {
+	if backend == "pi" || (backend == "omp" && effort == "") {
 		return ModelEffort(backend, model, effort)
 	}
 	return effort
