@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/go-logr/logr v1.4.4
 	github.com/prometheus/client_golang v1.25.0
-	github.com/tuna-os/ccleft v0.0.0-20261015160220-a006be71fbd7
+	github.com/tuna-os/ccleft v0.0.0-20261017191328-f7b038e01889
 	k8s.io/api v0.37.1
 	k8s.io/apimachinery v0.37.1
 	k8s.io/client-go v0.37.1
