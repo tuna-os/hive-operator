@@ -318,7 +318,7 @@ func (r *HiveSpokeReconciler) rotate(ctx context.Context, sp *hivev1.HiveSpoke, 
 			Reason: "NoLadder", Message: err.Error(), ObservedGeneration: sp.Generation})
 		return
 	}
-	rungs := ladderRungs(ladder.Status.Effective)
+	rungs := qualityRungs(&ladder)
 	enforce := mode == hivev1.ModeEnforce && act != nil
 	if enforce {
 		if n := seedPaceJournal(sp, rungs, now); n > 0 {

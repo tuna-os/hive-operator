@@ -51,7 +51,21 @@ func placementEffort(backend, model, effort string) string {
 }
 
 func (r Rung) eligible(minimum string) bool {
-	return ScoreMeets(r.Score, minimum) && (minimum == "" || r.Effort == "" || r.Effort == r.EffortValue())
+	if !ScoreMeets(r.Score, minimum) {
+		return false
+	}
+	if minimum == "" {
+		return true
+	}
+	effort := r.EffortValue()
+	return effort != "" && (r.Effort == "" || r.Effort == effort)
+}
+
+func observedEffort(backend, model, effort string) string {
+	if backend == "pi" {
+		return ModelEffort(backend, model, effort)
+	}
+	return effort
 }
 
 // PlacementAllowed checks the one effective ladder, independent of tier: pace
@@ -60,10 +74,7 @@ func (in Input) PlacementAllowed(backend, model, effort string) bool {
 	if in.MinimumScore == "" {
 		return true
 	}
-	actual := effort
-	if backend == "pi" {
-		actual = ModelEffort(backend, model, effort)
-	}
+	actual := observedEffort(backend, model, effort)
 	for _, r := range in.Rungs {
 		if r.Backend == backend && r.Model == model && r.eligible(in.MinimumScore) && r.EffortValue() == actual {
 			return true

@@ -78,8 +78,9 @@ func (r *ModelLadderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			continue
 		}
 		if !rotation.ScoreMeets(rung.Score, ladder.Spec.MinimumScore) ||
-			(ladder.Spec.MinimumScore != "" && rung.Effort != "" && rung.Effort != rotation.ModelEffort(rung.Backend, rung.Model, rung.Effort)) {
-			dropped = append(dropped, fmt.Sprintf("%s/%s effort=%s: unscored, invalid, conflicting effort, or below minimumScore %s", rung.Provider, rung.Model, rung.Effort, ladder.Spec.MinimumScore))
+			(ladder.Spec.MinimumScore != "" && (rotation.ModelEffort(rung.Backend, rung.Model, rung.Effort) == "" ||
+				(rung.Effort != "" && rung.Effort != rotation.ModelEffort(rung.Backend, rung.Model, rung.Effort)))) {
+			dropped = append(dropped, fmt.Sprintf("%s/%s effort=%s: unscored, invalid, implicit or conflicting effort, or below minimumScore %s", rung.Provider, rung.Model, rung.Effort, ladder.Spec.MinimumScore))
 			continue
 		}
 		key := rungIdentity(rung)

@@ -26,17 +26,17 @@ restarted ~25 times in one evening when pace and rotate disagreed.
 `ModelLadder.spec.minimumScore` is an opt-in, inclusive floor on each exact
 model **and reasoning effort**, using the existing rung `score` strings. For
 example, `minimumScore: "40.2"` admits a rung scored `"40.2"` but not `"39.7"`.
-Only supplied finite numeric scores count: missing/invalid scores, conflicting
-effort declarations and invalid floor values fail closed. The operator does not
+Only supplied finite numeric scores count: missing/invalid scores, implicit or
+conflicting effort declarations and invalid floor values fail closed. The operator does not
 infer scores from model families, contributor variants, aliases or other efforts.
 Omitting the field retains legacy placement and hardcoded pacing behavior.
 
 Deploy the operator **and ModelLadder CRD schema** before setting the floor;
 older schemas prune unknown fields. Populate scored, inventory-supported exact
 rungs at every required tier, then enable the floor. `status.effective` and
-`status.dropped` expose eligibility and rejection reasons. Consumers also
-recheck scores against the current spec so stale ladder status cannot admit an
-old unscored model.
+`status.dropped` expose eligibility and rejection reasons. With a floor enabled,
+consumers require a current-generation `Ready` condition and recheck scores.
+Removed, newly downgraded or unscored rungs in old status cannot authorize a launch.
 
 Rotation corrects active off-policy placements, including old pace demotions,
 but preserves pins, declared holds, intentional pauses and on-demand agents.

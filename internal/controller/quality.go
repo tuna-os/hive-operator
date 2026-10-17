@@ -6,6 +6,8 @@ import (
 	hivev1 "github.com/tuna-os/hive-operator/api/v1alpha1"
 	"github.com/tuna-os/hive-operator/internal/rotation"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apiMeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -44,5 +46,15 @@ func spokeQuality(ctx context.Context, c client.Client, sp *hivev1.HiveSpoke) (s
 		}
 		return "unavailable", nil // fail closed when policy cannot be read
 	}
-	return ladder.Spec.MinimumScore, ladderRungs(ladder.Status.Effective)
+	return ladder.Spec.MinimumScore, qualityRungs(&ladder)
+}
+
+func qualityRungs(ladder *hivev1.ModelLadder) []rotation.Rung {
+	if ladder.Spec.MinimumScore != "" {
+		ready := apiMeta.FindStatusCondition(ladder.Status.Conditions, "Ready")
+		if ready == nil || ready.ObservedGeneration != ladder.Generation || ready.Status != metav1.ConditionTrue {
+			return nil
+		}
+	}
+	return ladderRungs(ladder.Status.Effective)
 }

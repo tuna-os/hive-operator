@@ -18,8 +18,8 @@ func TestLadderMinimumScoreFiltersWithoutInventingEvidence(t *testing.T) {
 	for _, minimum := range []string{"40.2", "", "NaN"} {
 		t.Run("floor="+minimum, func(t *testing.T) {
 			ladder := &hivev1.ModelLadder{ObjectMeta: metav1.ObjectMeta{Name: "fleet"}, Spec: hivev1.ModelLadderSpec{MinimumScore: minimum}}
-			for i, score := range []string{"40.2", "39.7", "", "NaN", "+Inf"} {
-				ladder.Spec.Builtin = append(ladder.Spec.Builtin, hivev1.Rung{Tier: "T2", Provider: "openai", Backend: "codex", Model: "gpt-5.6-luna", Effort: []string{"max", "xhigh", "high", "medium", "low"}[i], Score: score})
+			for i, score := range []string{"40.2", "39.7", "", "NaN", "+Inf", "43.6"} {
+				ladder.Spec.Builtin = append(ladder.Spec.Builtin, hivev1.Rung{Tier: "T2", Provider: "openai", Backend: "codex", Model: "gpt-5.6-luna", Effort: []string{"max", "xhigh", "high", "medium", "low", ""}[i], Score: score})
 			}
 			c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(ladder).WithStatusSubresource(ladder).Build()
 			r := &ModelLadderReconciler{Client: c}
@@ -32,36 +32,54 @@ func TestLadderMinimumScoreFiltersWithoutInventingEvidence(t *testing.T) {
 			}
 			want := 1
 			if minimum == "" {
-				want = 5
+				want = 6
 			}
 			if minimum == "NaN" {
 				want = 0
 			}
-			if len(got.Status.Effective) != want || len(got.Status.Dropped) != 5-want {
+			if len(got.Status.Effective) != want || len(got.Status.Dropped) != 6-want {
 				t.Fatalf("effective=%+v dropped=%v", got.Status.Effective, got.Status.Dropped)
 			}
 		})
 	}
 }
 
-func TestRotationReadsFloorEvenBeforeLadderStatusRefresh(t *testing.T) {
-	ladder := &hivev1.ModelLadder{ObjectMeta: metav1.ObjectMeta{Name: "fleet"}, Spec: hivev1.ModelLadderSpec{MinimumScore: "40.2"},
-		Status: hivev1.ModelLadderStatus{Effective: []hivev1.Rung{
-			{Tier: "T2", Provider: "anthropic", Backend: "claude", Model: "claude-haiku-4-5", Effort: "max", Available: true},
-			{Tier: "T2", Provider: "anthropic", Backend: "claude", Model: "claude-sonnet-5", Effort: "max", Score: "43.6", Available: true},
-		}}}
+func TestRotationRejectsRemovedRungsUntilCurrentGenerationIsReady(t *testing.T) {
+	ctx := context.Background()
+	ladder := &hivev1.ModelLadder{ObjectMeta: metav1.ObjectMeta{Name: "fleet", Generation: 2},
+		Spec: hivev1.ModelLadderSpec{MinimumScore: "40.2", Builtin: []hivev1.Rung{
+			{Tier: "T2", Provider: "google", Backend: "omp", Model: "google-antigravity/gemini-3.8-flash", Effort: "high", Score: "40.2"},
+		}},
+		Status: hivev1.ModelLadderStatus{
+			Conditions: []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue, ObservedGeneration: 1, Reason: "Ready"}},
+			Effective: []hivev1.Rung{
+				{Tier: "T2", Provider: "anthropic", Backend: "claude", Model: "claude-sonnet-5", Effort: "max", Score: "43.6", Available: true},
+			}}}
 	sp := &hivev1.HiveSpoke{ObjectMeta: metav1.ObjectMeta{Name: "reef"},
 		Spec:   hivev1.HiveSpokeSpec{Namespace: "hive-reef", PrimarySpoke: "school", Pace: &hivev1.PaceSpec{Disabled: true}},
 		Status: hivev1.HiveSpokeStatus{Agents: []hivev1.AgentState{{Name: "guide", Backend: "claude", Model: "claude-haiku-4-5", Effort: "max", Cadence: "1h"}}}}
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(ladder).Build()
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(ladder).WithStatusSubresource(ladder).Build()
 	r := &HiveSpokeReconciler{Client: c}
-	act := &recActuator{}
-	r.rotate(context.Background(), sp, hivev1.ModeEnforce, map[string]rotation.Reading{"anthropic": {Percent: 10}}, nil, act, time.Now())
-	if len(act.calls) != 1 || act.calls[0] != "hive-reef move guide claude-sonnet-5" {
-		t.Fatalf("stale effective status must not preserve unscored current model: %v", act.calls)
+	now := time.Now()
+	readings := map[string]rotation.Reading{"anthropic": {Percent: 10}, "google": {Percent: 10}}
+	r.rotate(ctx, sp, hivev1.ModeEnforce, readings, nil, &recActuator{}, now)
+	if len(sp.Status.RotationPlan) != 1 || sp.Status.RotationPlan[0].Action != rotation.ActionStrand {
+		t.Fatalf("removed scored backend must not be selected from stale status: %+v", sp.Status.RotationPlan)
 	}
-	if len(sp.Status.RotationPlan) != 1 || sp.Status.RotationPlan[0].ToEffort != "max" {
-		t.Fatalf("exact scored effort must survive controller conversion: %+v", sp.Status.RotationPlan)
+	minimum, rungs := spokeQuality(ctx, c, sp)
+	if (rotation.Input{MinimumScore: minimum, Rungs: rungs}).PlacementAllowed("claude", "claude-sonnet-5", "max") {
+		t.Fatal("pace, liveness and release consumers must reject the stale scored backend")
+	}
+	if _, err := (&ModelLadderReconciler{Client: c}).Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Name: "fleet"}}); err != nil {
+		t.Fatal(err)
+	}
+	r.rotate(ctx, sp, hivev1.ModeEnforce, readings, nil, &recActuator{}, now.Add(time.Hour))
+	if len(sp.Status.RotationPlan) == 0 {
+		t.Fatal("current-generation ladder produced no decision")
+	}
+	latest := sp.Status.RotationPlan[len(sp.Status.RotationPlan)-1]
+	if latest.Action != rotation.ActionMove || latest.ToBackend != "omp" || latest.ToEffort != "high" {
+		t.Fatalf("current-generation ladder must permit the approved exact effort: %+v", latest)
 	}
 }
 
@@ -69,6 +87,7 @@ func TestQualityFloorHoldsWatchdogAndNudgeOnUnscoredPlacements(t *testing.T) {
 	sp, li := livenessSpoke(hivev1.ModeEnforce, hivev1.ModeEnforce)
 	ladder := livenessLadder()
 	ladder.Spec.MinimumScore = "40.2"
+	ladder.Status.Conditions = []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue, ObservedGeneration: ladder.Generation, Reason: "Ready"}}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(ladder).Build()
 	r := &HiveSpokeReconciler{Client: c}
 	api := &fakeLiveness{governor: govYAML}

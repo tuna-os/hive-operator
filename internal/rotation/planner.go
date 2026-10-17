@@ -769,7 +769,7 @@ func Compute(in Input) Plan {
 		}
 		s.notePlacement(want.Provider, a)
 		to := Placement{want.Provider, want.Backend, want.Model}
-		if want.Backend == a.CLI && want.Model == a.Model && (in.MinimumScore == "" || want.EffortValue() == ModelEffort(a.CLI, a.Model, a.Effort)) {
+		if want.Backend == a.CLI && want.Model == a.Model && (in.MinimumScore == "" || want.EffortValue() == observedEffort(a.CLI, a.Model, a.Effort)) {
 			add(Decision{Agent: a.Name, Action: ActionKeep, From: cur, To: to, Reason: "already best",
 				Line: line("%-14s %-9s %s ok", a.Name, curp, a.Model)})
 			continue

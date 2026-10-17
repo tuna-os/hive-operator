@@ -158,3 +158,25 @@ func TestKiroCreditMultProviderQualifiedSpellingEquivalence(t *testing.T) {
 		}
 	}
 }
+
+func TestQualityRotationRejectsImplicitEffort(t *testing.T) {
+	in := qualityInput()
+	in.Providers["openai"] = Reading{Percent: 10}
+	in.Rungs[0] = Rung{Tier: "T2", Provider: "openai", Backend: "omp", Model: "openai-codex/gpt-5.6-luna", Score: "42.1"}
+	if p := Compute(in); len(p.Decisions) != 1 || p.Decisions[0].Action != ActionStrand {
+		t.Fatalf("implicit effort must not inherit a previous model's unmeasured effort: %+v", p)
+	}
+	in.Rungs[0].Effort = "max"
+	if p := Compute(in); len(p.Decisions) != 1 || p.Decisions[0].Action != ActionMove || p.Decisions[0].ToEffort != "max" {
+		t.Fatalf("explicit measured effort must remain placeable: %+v", p)
+	}
+}
+
+func TestQualityRotationRepairsActualAgyEffortDrift(t *testing.T) {
+	in := qualityInput()
+	in.Agents[0] = Agent{Name: "guide", CLI: "agy", Model: "gemini-3.8-flash-high", Effort: "low", Cadence: "1h"}
+	in.Rungs[0] = Rung{Tier: "T2", Provider: "google", Backend: "agy", Model: "gemini-3.8-flash-high", Score: "40.2"}
+	if p := Compute(in); len(p.Decisions) != 1 || p.Decisions[0].Action != ActionMove || p.Decisions[0].ToEffort != "high" {
+		t.Fatalf("model suffix must not hide actual effort drift: %+v", p)
+	}
+}
