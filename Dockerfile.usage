@@ -1,14 +1,14 @@
 # hive-usage: the per-hive-pod usage sidecar (cmd/hive-usage) plus a pinned
 # ccusage binary. ccusage ships a static-pie Rust build per platform on npm as
 # @ccusage/ccusage-<os>-<arch>; no Node runtime is needed.
-FROM golang:1.27 AS build
+FROM golang:1.27@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/hive-usage ./cmd/hive-usage
 
-FROM debian:trixie-slim AS ccusage
+FROM debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 AS ccusage
 # Bump both together; the integrity is npm's dist.integrity for the tarball:
 #   curl -s https://registry.npmjs.org/@ccusage/ccusage-linux-x64/<v> | jq -r .dist.integrity
 ARG CCUSAGE_VERSION=20.0.24
@@ -23,7 +23,7 @@ RUN set -eu; \
     install -m 0755 /tmp/package/bin/ccusage /ccusage; \
     /ccusage --version
 
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99
 COPY --from=build /out/hive-usage /hive-usage
 COPY --from=ccusage /ccusage /usr/local/bin/ccusage
 # The agents' files are dev:node (1001:1000) with mode 660/2770: run as

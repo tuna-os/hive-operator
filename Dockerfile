@@ -1,15 +1,13 @@
-# Pin base images to specific digests for reproducibility and supply-chain security.
-# To verify/update digests:
-#   docker pull golang:1.27 && docker inspect --format='{{.RepoDigests}}' golang:1.27
-#   docker pull gcr.io/distroless/static:nonroot && docker inspect --format='{{.RepoDigests}}' gcr.io/distroless/static:nonroot
-FROM golang:1.27@sha256:8dc93cbce80b62e32bcaed0c79bca3f0dbddcd6c8e6efe09de55c2af09a6f75a AS build
+# Base images are pinned to multi-arch index digests for reproducibility and
+# supply-chain safety; Renovate keeps the digests current.
+FROM golang:1.27@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/manager ./cmd
 
-FROM gcr.io/distroless/static:nonroot@sha256:1b96d8c4b6a1e6d3b0e6f8a7c5c5a5b5c5c5a5c5c5c5a5c5c5c5a5c5c5a5c5c5
+FROM gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99
 WORKDIR /
 COPY --from=build /out/manager /manager
 USER 65532:65532
