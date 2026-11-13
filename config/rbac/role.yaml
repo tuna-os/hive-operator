@@ -20,7 +20,6 @@ rules:
   resources:
   - nodes
   - pods
-  - secrets
   verbs:
   - get
   - list
@@ -31,6 +30,12 @@ rules:
   - pods/exec
   verbs:
   - create
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
 - apiGroups:
   - ""
   - events.k8s.io
