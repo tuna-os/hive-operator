@@ -140,6 +140,8 @@ github.com/tuna-os/ccleft v0.0.0-20261030032045-ee6302e768d6 h1:ilIy3HW6hMlFuBKP
 github.com/tuna-os/ccleft v0.0.0-20261030032045-ee6302e768d6/go.mod h1:Z8dUO2JA5tNGq820FRBVGUQxPNGK8ZiTnE21wc1Qq8w=
 github.com/tuna-os/ccleft v0.0.0-20261031200930-5adeb0bf8862 h1:QZeieuOn85HfCumD4Fnz7WpXKlgbLd7KYxzU+TQAP4c=
 github.com/tuna-os/ccleft v0.0.0-20261031200930-5adeb0bf8862/go.mod h1:Z8dUO2JA5tNGq820FRBVGUQxPNGK8ZiTnE21wc1Qq8w=
+github.com/tuna-os/ccleft v0.0.0-20261114033607-5ba84f9e3300 h1:HpnFmhIrCGUUz56D5TF9C4EtX/6FHDduHhlMUgW0cqw=
+github.com/tuna-os/ccleft v0.0.0-20261114033607-5ba84f9e3300/go.mod h1:Z8dUO2JA5tNGq820FRBVGUQxPNGK8ZiTnE21wc1Qq8w=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
