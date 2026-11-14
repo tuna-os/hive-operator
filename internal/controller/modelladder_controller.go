@@ -32,11 +32,17 @@ type ModelLadderReconciler struct {
 	client.Client
 	Interval time.Duration
 	HTTP     *http.Client
+	// Secrets reads the benchmark key uncached. A read through the cached
+	// Client would start an informer over every Secret in the cluster and need
+	// list and watch on all of them, to fetch one that the ladder names.
+	Secrets client.Reader
 }
 
-// controller-runtime reads these through its cache, which needs list/watch in
-// addition to get even though reconciliation only fetches named objects.
-// +kubebuilder:rbac:groups="",resources=configmaps;secrets,verbs=get;list;watch
+// controller-runtime reads ConfigMaps through its cache, which needs list/watch
+// in addition to get even though reconciliation only fetches named objects.
+// Secrets are read uncached (see Secrets above), so get is enough.
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
 // +kubebuilder:rbac:groups=hive.tunaos.org,resources=modelladders,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=hive.tunaos.org,resources=modelladders/status,verbs=get;update;patch
 
@@ -163,6 +169,15 @@ func (r *ModelLadderReconciler) inventory(ctx context.Context, ladder *hivev1.Mo
 	return result, nil
 }
 
+// secrets is the reader for the benchmark key. Tests that build the reconciler
+// without a manager fall back to Client.
+func (r *ModelLadderReconciler) secrets() client.Reader {
+	if r.Secrets != nil {
+		return r.Secrets
+	}
+	return r.Client
+}
+
 func (r *ModelLadderReconciler) benchmark(ctx context.Context, ladder *hivev1.ModelLadder) ([]hivev1.Rung, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ladder.Spec.BenchmarkURL, nil)
 	if err != nil {
@@ -170,7 +185,7 @@ func (r *ModelLadderReconciler) benchmark(ctx context.Context, ladder *hivev1.Mo
 	}
 	if ref := ladder.Spec.BenchmarkSecretRef; ref != nil {
 		var sec corev1.Secret
-		if err := r.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, &sec); err != nil {
+		if err := r.secrets().Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, &sec); err != nil {
 			return nil, err
 		}
 		req.Header.Set("Authorization", "Bearer "+string(sec.Data[ref.Key]))
@@ -224,5 +239,8 @@ func tierForScore(score string, bands []hivev1.BandSpec) string {
 }
 
 func (r *ModelLadderReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Secrets == nil {
+		r.Secrets = mgr.GetAPIReader()
+	}
 	return ctrl.NewControllerManagedBy(mgr).For(&hivev1.ModelLadder{}).Complete(r)
 }
