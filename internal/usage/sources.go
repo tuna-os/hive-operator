@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -323,12 +324,20 @@ func (c *Collector) agentFromDB(dirs []string, sessionID string) string {
 	return agent
 }
 
+// scanAgent reads p for the agent path. The conversations directory is
+// writable by every agent, so p is opened without blocking and read only if
+// it is a regular file: a plain open of a named pipe waits for a writer that
+// never comes, and the collection loop waits with it. The type is checked on
+// the open descriptor, so the file cannot be swapped between check and read.
 func scanAgent(p string) string {
-	f, err := os.Open(p)
+	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return Unattributed
 	}
 	defer f.Close()
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+		return Unattributed
+	}
 	b, err := io.ReadAll(io.LimitReader(f, 64<<20))
 	if err != nil {
 		return Unattributed
