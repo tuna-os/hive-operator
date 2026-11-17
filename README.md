@@ -188,13 +188,18 @@ make build test
 make run                  # against your current kubecontext; dashboard on :8082
 ```
 
+The samples are the live fleet's desired state, so most of them are in
+**Enforce**: applying them lets the operator write. To see only the plan, set
+`mode: Shadow` (and `rotationMode`/`livenessMode: Shadow` on each `HiveSpoke`)
+before applying.
+
 ```bash
 kubectl apply -f config/crd
 kubectl apply -f config/rbac
 kubectl apply -f config/manager
-kubectl apply -f config/samples/fleet.yaml
-kubectl apply -f config/samples/release.yaml   # HiveRelease, Shadow
-kubectl apply -f config/samples/housekeeping.yaml   # HiveHousekeeping, Shadow (docs/housekeeping.md)
+kubectl apply -f config/samples/fleet.yaml          # SharedAuth + HiveSpoke rotation/liveness Enforce; ModelLadder Shadow
+kubectl apply -f config/samples/release.yaml        # HiveRelease, Enforce (docs/release.md)
+kubectl apply -f config/samples/housekeeping.yaml   # HiveHousekeeping, Enforce (docs/housekeeping.md)
 kubectl apply -f config/usage/usagepools.yaml
 ```
 
@@ -216,8 +221,8 @@ See DESIGN.md §7 for how to classify a difference before calling it a bug.
 
 ## Roadmap
 
-1. ~~`SharedAuth` (shadow)~~ — done, now at parity with the live script.
-   Promote it to Enforce and suspend `hive-shared-auth` in one change
+1. ~~`SharedAuth`~~ — done, at parity with the live script. In Enforce since
+   #50, with `hive-shared-auth` suspended in the same change
    ([`docs/housekeeping.md`](docs/housekeeping.md) step 3).
 8. ~~Housekeeping~~ — `HiveHousekeeping` owns the remaining hive-ops CronJobs
    and retires the superseded rotate/watchdog jobs.
@@ -225,12 +230,12 @@ See DESIGN.md §7 for how to classify a difference before calling it a bug.
    band derivation are implemented. It stays read-only by design — rotation
    consumes `Status.Effective`, `ModelLadder` itself never applies anything.
 3. ~~`Rotation` shadow controller~~ — done (PR #15): provider probes and
-   placement now run in Shadow across all three spokes. Promoting to Enforce
-   and suspending the legacy `hive-rotate*` CronJobs is tracked in
+   placement run in Enforce on all three spokes (#45, #46), with the legacy
+   `hive-rotate*` CronJobs suspended; see
    [`docs/rotation-promotion.md`](docs/rotation-promotion.md).
 4. ~~`HiveRelease` shadow controller~~ — done: image version with canary, gate,
-   soak, rollback, blocklist and drift detection. Promote to Enforce and
-   **delete** `hive/hive-upgrade` in the same change; see
+   soak, rollback, blocklist and drift detection. In Enforce since #40, which
+   deleted `hive/hive-upgrade` in the same change; see
    [`docs/release.md`](docs/release.md).
 5. ~~`Watchdog`~~ — ported into the HiveSpoke controller under
    `spec.livenessMode` (Shadow): pane classification with a live-pane
