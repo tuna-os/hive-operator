@@ -37,31 +37,87 @@ type LivenessAPI interface {
 	Hygiene(ctx context.Context, ns string) error
 }
 
+// rootFixPerms defines fixperms, the only way the repair execs below change
+// an owner or a mode. They run as root, in directories every agent account
+// can write, so a name there may be a symlink an agent planted, or may be
+// swapped for one while the script runs. Plain chown/chmod and find -exec
+// chmod act on whatever the name points to at that moment, which handed an
+// agent ownership dev:node and mode 660 on any file root can reach.
+//
+// fixperms walks to DIR one component at a time and refuses any component
+// that is a symlink or that changed between lstat and chdir. It then opens
+// each entry relative to that directory with O_NOFOLLOW and changes it
+// through the descriptor (fchown/fchmod), so a symlink is skipped and a swap
+// after the check changes nothing. Perl is perl-base, which is Essential in
+// the hive's Debian image; without it the repair does nothing.
+//
+//	fixperms OWNER GROUP DIR DIRMODE FILEMODE top|tree json|all
+//
+// top: DIR (unless DIRMODE is -) and the entries directly in it, as the
+// shell globs DIR/*.json (json) or DIR/* (all) would match them; files get
+// FILEMODE, directories only the owner; modes are set exactly.
+// tree: everything under DIR, like chown -R plus find -type f/-type d ! -perm
+// -MODE -exec chmod MODE; a mode is set only where bits are missing.
+const rootFixPerms = `fixperms() { perl -MFcntl -e '
+my ($u, $g, $dir, $dm, $fm, $how, $sel) = @ARGV;
+my $uid = getpwnam($u); my $gid = getgrnam($g);
+die "unknown owner $u:$g\n" unless defined $uid && defined $gid;
+sub fix { my ($h, $want) = @_;
+  chown($uid, $gid, $h);
+  return unless defined $want;
+  my $m = (stat($h))[2] & 07777; my $w = oct($want);
+  chmod($w, $h) if $how eq "top" ? $m != $w : ($m & $w) != $w;
+}
+sub enter { my $n = shift; my @l = lstat($n);
+  return 0 unless @l && -d _;
+  chdir($n) or return 0;
+  my @s = stat(".");
+  die "$n moved\n" unless @s && $s[0] == $l[0] && $s[1] == $l[1];
+  1 }
+sub walk { my $deep = shift;
+  sysopen(my $d, ".", O_RDONLY | O_DIRECTORY) or return;
+  fix($d, $dm) unless $dm eq "-";
+  my @here = stat($d);
+  opendir(my $dh, ".") or return; my @names = readdir($dh); closedir($dh);
+  for my $n (@names) {
+    next if $n eq "." || $n eq "..";
+    next if !$deep && ($n =~ /^\./ || ($sel eq "json" && $n !~ /\.json\z/));
+    sysopen(my $h, $n, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY) or next;
+    stat($h) or next;
+    if (-f _) { fix($h, $fm) }
+    elsif (-d _ && $deep) {
+      enter($n) or next;
+      walk(1);
+      chdir("..") or die "..\n";
+      my @b = stat(".");
+      die "left $n\n" unless $b[0] == $here[0] && $b[1] == $here[1];
+    }
+    elsif (-d _ && $sel eq "all") { fix($h) }
+  }
+}
+chdir("/") or die "/\n";
+for (grep { length } split m{/}, $dir) { enter($_) or exit 0 }
+walk($how eq "tree");
+' "$@" 2>/dev/null; }
+`
+
 // livenessPermsFix reopens the shared first-run state every agy/muse launch
 // rewrites mode 0600 under its own uid, so the NEXT agent to launch hits
 // EACCES and sits on a wizard. Only a root exec can chmod a file another
 // agent uid owns (v5's entrypoint perm guard runs as dev).
-const livenessPermsFix = `for f in /data/home/.gemini/antigravity-cli/cache/*.json /data/home/.gemini/antigravity-cli/*.json \
-         /data/home/.config/muse/*.json; do
-  [ -f "$f" ] || continue
-  chown dev:node "$f" 2>/dev/null; chmod 660 "$f" 2>/dev/null
-done`
+const livenessPermsFix = rootFixPerms + `fixperms dev node /data/home/.gemini/antigravity-cli/cache - 660 top json
+fixperms dev node /data/home/.gemini/antigravity-cli - 660 top json
+fixperms dev node /data/home/.config/muse - 660 top json`
 
 // livenessHygiene is gemini_hygiene: agy's top-level settings/onboarding and
 // cache (a recursive sweep of antigravity-cli blew a 90 s exec), muse's
 // shared trust store, and the per-agent codex sqlite homes. Directories
 // 2770 (setgid keeps the node group), files 660.
-const livenessHygiene = `g=/data/home/.gemini/antigravity-cli
-if [ -d "$g" ]; then
-  chown dev:node "$g" "$g"/*.json "$g/cache" "$g"/cache/* 2>/dev/null
-  chmod 660 "$g"/*.json "$g"/cache/* 2>/dev/null
-  chmod 2770 "$g" "$g/cache" 2>/dev/null
-fi
+const livenessHygiene = rootFixPerms + `fixperms dev node /data/home/.gemini/antigravity-cli 2770 660 top json
+fixperms dev node /data/home/.gemini/antigravity-cli/cache 2770 660 top all
 for d in /data/home/.config/muse /data/home/.codex-*; do
   [ -d "$d" ] || continue
-  chown -R dev:node "$d" 2>/dev/null
-  find "$d" -type f ! -perm -660 -exec chmod 660 {} + 2>/dev/null
-  find "$d" -type d ! -perm -2770 -exec chmod 2770 {} + 2>/dev/null
+  fixperms dev node "$d" 2770 660 tree all
 done
 true`
 

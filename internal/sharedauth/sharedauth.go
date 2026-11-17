@@ -260,28 +260,41 @@ func quoteAll(ss []string) string {
 // is decided per repair ($2 theme, $3 statusLine, $4 perms) so each can be
 // switched off in the spec, and the perm repair announces itself.
 // Args: $1 home, $2-$4 check|reconcile, $5 space-separated dirs.
+//
+// It runs as root in directories agents can write, so the theme and
+// statusLine repairs never write through the name: a symlink there is
+// refused, the old file is read through one descriptor that must be the
+// entry itself, and the result replaces the entry by rename with the old
+// owner and mode. The copy in testdata (and ConfigMap hive/hive-ops-scripts)
+// carries the same text.
 const spokeScript = `
 H="$1"; TA="$2"; SA="$3"; PA="$4"; DIRS="$5"
+rewrite() {
+  [ ! -L "$1" ] && tmp=$(mktemp) || return 1
+  if { [ "$(stat -c %d:%i -- "$1")" = "$(stat -L -c %d:%i /proc/self/fd/3)" ] \
+       && jq "$2" <&3 > "$tmp" && chmod "$(stat -L -c %a /proc/self/fd/3)" "$tmp" \
+       && chown -h "$(stat -L -c %u:%g /proc/self/fd/3)" "$tmp"; } 3<"$1" && mv -fT "$tmp" "$1"; then return 0; fi
+  rm -f "$tmp"; return 1
+}
 t=$(jq -r "if ((.claudeAiOauth.accessToken // \"\") == \"\") then \"EMPTY\" else \"ok\" end" "$H/.claude/.credentials.json" 2>/dev/null)
 echo "token ${t:-unreadable}"
 th=$(jq -r ".theme // \"null\"" "$H/.claude.json" 2>/dev/null)
 if [ "${th:-null}" = null ]; then
   if [ "$TA" = reconcile ]; then
     f="$H/.claude.json"
-    if [ ! -f "$f" ]; then
-      printf "%s" "{\"theme\":\"dark\",\"hasCompletedOnboarding\":true}" > "$f" && chgrp node "$f" && chmod 664 "$f" \
-        && echo "theme repaired" || echo "theme repair-failed"
+    if [ -L "$f" ]; then echo "theme repair-failed"
+    elif [ ! -f "$f" ]; then
+      tmp=$(mktemp) && printf "%s" "{\"theme\":\"dark\",\"hasCompletedOnboarding\":true}" > "$tmp" && chgrp node "$tmp" && chmod 664 "$tmp" \
+        && mv -fT "$tmp" "$f" && echo "theme repaired" || { rm -f "$tmp"; echo "theme repair-failed"; }
     else
-      tmp=$(mktemp) && jq ".theme = \"dark\" | .hasCompletedOnboarding = true" "$f" > "$tmp" \
-        && cat "$tmp" > "$f" && rm -f "$tmp" && echo "theme repaired" || echo "theme repair-failed"
+      rewrite "$f" ".theme = \"dark\" | .hasCompletedOnboarding = true" && echo "theme repaired" || echo "theme repair-failed"
     fi
   else echo "theme unset"; fi
 fi
 sf="$H/.gemini/antigravity-cli/settings.json"
 if [ -f "$sf" ] && [ "$(jq -r ".statusLine.command // empty" "$sf" 2>/dev/null)" = "/status" ]; then
   if [ "$SA" = reconcile ]; then
-    tmp=$(mktemp) && jq "del(.statusLine)" "$sf" > "$tmp" && cat "$tmp" > "$sf" && rm -f "$tmp" \
-      && echo "statusline repaired" || echo "statusline repair-failed"
+    rewrite "$sf" "del(.statusLine)" && echo "statusline repaired" || echo "statusline repair-failed"
   else echo "statusline broken"; fi
 fi
 if [ "$PA" = reconcile ]; then
