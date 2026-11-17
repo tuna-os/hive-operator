@@ -104,26 +104,32 @@ for ns in $NAMESPACES; do
   # shellcheck disable=SC2016
   out=$(timeout "${HIVE_EXEC_TIMEOUT:-120}" kubectl exec -n "$ns" "$pod" -- sh -c '
     H="$1"; ACT="$2"; DIRS="$3"
+    rewrite() {
+      [ ! -L "$1" ] && tmp=$(mktemp) || return 1
+      if { [ "$(stat -c %d:%i -- "$1")" = "$(stat -L -c %d:%i /proc/self/fd/3)" ] \
+           && jq "$2" <&3 > "$tmp" && chmod "$(stat -L -c %a /proc/self/fd/3)" "$tmp" \
+           && chown -h "$(stat -L -c %u:%g /proc/self/fd/3)" "$tmp"; } 3<"$1" && mv -fT "$tmp" "$1"; then return 0; fi
+      rm -f "$tmp"; return 1
+    }
     t=$(jq -r "if ((.claudeAiOauth.accessToken // \"\") == \"\") then \"EMPTY\" else \"ok\" end" "$H/.claude/.credentials.json" 2>/dev/null)
     echo "token ${t:-unreadable}"
     th=$(jq -r ".theme // \"null\"" "$H/.claude.json" 2>/dev/null)
     if [ "${th:-null}" = null ]; then
       if [ "$ACT" = reconcile ]; then
         f="$H/.claude.json"
-        if [ ! -f "$f" ]; then
-          printf "%s" "{\"theme\":\"dark\",\"hasCompletedOnboarding\":true}" > "$f" && chgrp node "$f" && chmod 664 "$f" \
-            && echo "theme repaired" || echo "theme repair-failed"
+        if [ -L "$f" ]; then echo "theme repair-failed"
+        elif [ ! -f "$f" ]; then
+          tmp=$(mktemp) && printf "%s" "{\"theme\":\"dark\",\"hasCompletedOnboarding\":true}" > "$tmp" && chgrp node "$tmp" && chmod 664 "$tmp" \
+            && mv -fT "$tmp" "$f" && echo "theme repaired" || { rm -f "$tmp"; echo "theme repair-failed"; }
         else
-          tmp=$(mktemp) && jq ".theme = \"dark\" | .hasCompletedOnboarding = true" "$f" > "$tmp" \
-            && cat "$tmp" > "$f" && rm -f "$tmp" && echo "theme repaired" || echo "theme repair-failed"
+          rewrite "$f" ".theme = \"dark\" | .hasCompletedOnboarding = true" && echo "theme repaired" || echo "theme repair-failed"
         fi
       else echo "theme unset"; fi
     fi
     sf="$H/.gemini/antigravity-cli/settings.json"
     if [ -f "$sf" ] && [ "$(jq -r ".statusLine.command // empty" "$sf" 2>/dev/null)" = "/status" ]; then
       if [ "$ACT" = reconcile ]; then
-        tmp=$(mktemp) && jq "del(.statusLine)" "$sf" > "$tmp" && cat "$tmp" > "$sf" && rm -f "$tmp" \
-          && echo "statusline repaired" || echo "statusline repair-failed"
+        rewrite "$sf" "del(.statusLine)" && echo "statusline repaired" || echo "statusline repair-failed"
       else echo "statusline broken"; fi
     fi
     if [ "$ACT" = reconcile ]; then
