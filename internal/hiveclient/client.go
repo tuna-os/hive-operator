@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 
@@ -43,6 +44,8 @@ type Client struct {
 	cs    kubernetes.Interface
 	cfg   *rest.Config
 	Label string
+	// execFn replaces the SPDY exec in tests.
+	execFn func(ctx context.Context, ns, pod string, argv []string, stdin io.Reader) (string, string, error)
 }
 
 // New builds a Client.
@@ -68,10 +71,19 @@ func (c *Client) Pod(ctx context.Context, ns string) (string, error) {
 
 // Exec runs argv in the hive pod and returns stdout.
 func (c *Client) Exec(ctx context.Context, ns, pod string, argv []string) (string, string, error) {
+	return c.ExecStdin(ctx, ns, pod, argv, nil)
+}
+
+// ExecStdin is Exec with stdin fed to the command (nil for none).
+func (c *Client) ExecStdin(ctx context.Context, ns, pod string, argv []string, stdin io.Reader) (string, string, error) {
+	if c.execFn != nil {
+		return c.execFn(ctx, ns, pod, argv, stdin)
+	}
 	req := c.cs.CoreV1().RESTClient().Post().
 		Resource("pods").Name(pod).Namespace(ns).SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Command: argv,
+			Stdin:   stdin != nil,
 			Stdout:  true,
 			Stderr:  true,
 		}, scheme.ParameterCodec)
@@ -81,25 +93,44 @@ func (c *Client) Exec(ctx context.Context, ns, pod string, argv []string) (strin
 		return "", "", err
 	}
 	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr})
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{Stdin: stdin, Stdout: &stdout, Stderr: &stderr})
 	return stdout.String(), stderr.String(), err
 }
 
 // Sh runs a /bin/sh -c script in the pod.
 func (c *Client) Sh(ctx context.Context, ns, pod, script string) (string, error) {
-	out, errOut, err := c.Exec(ctx, ns, pod, []string{"/bin/sh", "-c", script})
+	return c.ShStdin(ctx, ns, pod, script, "")
+}
+
+// ShStdin is Sh with stdin ("" for none).
+func (c *Client) ShStdin(ctx context.Context, ns, pod, script, stdin string) (string, error) {
+	var in io.Reader
+	if stdin != "" {
+		in = strings.NewReader(stdin)
+	}
+	out, errOut, err := c.ExecStdin(ctx, ns, pod, []string{"/bin/sh", "-c", script}, in)
 	if err != nil {
 		return out, fmt.Errorf("%w: %s", err, strings.TrimSpace(errOut))
 	}
 	return out, nil
 }
 
+// CurlTokenConfig is a curl config file (read with `curl -K -`) that sends
+// the token in X-Hive-Internal.
+//
+// The token goes to curl on standard input, never in the command: the
+// commands run inside the hive container, where every user, agents included,
+// can read /proc/<pid>/cmdline of the sh and curl processes for as long as
+// the request runs, and the header is owner-equivalent on the hive API.
+func CurlTokenConfig(token string) string {
+	esc := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", "", "\r", "").Replace(token)
+	return `header = "X-Hive-Internal: ` + esc + `"` + "\n"
+}
+
 // GetJSON performs an authenticated read via the internal header.
 func (c *Client) GetJSON(ctx context.Context, ns, pod, token, path string, v any) error {
-	script := fmt.Sprintf(
-		`curl -sS -m 25 -H %s %s 2>/dev/null`,
-		ShellQuote("X-Hive-Internal: "+token), ShellQuote(APIAddr+path))
-	out, err := c.Sh(ctx, ns, pod, script)
+	script := fmt.Sprintf(`curl -sS -m 25 -K - %s 2>/dev/null`, ShellQuote(APIAddr+path))
+	out, err := c.ShStdin(ctx, ns, pod, script, CurlTokenConfig(token))
 	if err != nil {
 		return err
 	}
@@ -114,13 +145,16 @@ func (c *Client) GetJSON(ctx context.Context, ns, pod, token, path string, v any
 // Pass curl straight to exec rather than wrapping it in another `sh -c` with an
 // interpolated secret: that has produced responses that parse but describe a
 // different request.
+//
+// The token is sent on standard input (CurlTokenConfig); the body is not
+// secret and stays in the command.
 func (c *Client) Do(ctx context.Context, ns, pod, token, method, path string, body []byte) (string, error) {
-	script := fmt.Sprintf(`curl -sS -m 75 -X %s -H %s`, ShellQuote(method), ShellQuote("X-Hive-Internal: "+token))
+	script := fmt.Sprintf(`curl -sS -m 75 -X %s -K -`, ShellQuote(method))
 	if body != nil {
 		script += fmt.Sprintf(` -H 'Content-Type: application/json' --data-raw %s`, ShellQuote(string(body)))
 	}
 	script += " " + ShellQuote(APIAddr+path) + " 2>&1"
-	return c.Sh(ctx, ns, pod, script)
+	return c.ShStdin(ctx, ns, pod, script, CurlTokenConfig(token))
 }
 
 // Post performs a body-less owner mutation such as pause, resume or kick.

@@ -139,9 +139,11 @@ func (b boundAPI) Restart(ctx context.Context, ns, agent string, fixPerms bool) 
 	if !fixPerms {
 		return b.c.Post(ctx, ns, b.pod, b.token, "/api/restart/"+hiveclient.EscapePath(agent))
 	}
-	script := livenessPermsFix + "\n" + fmt.Sprintf(`curl -sS -X POST --max-time 150 -H %s %s 2>&1`,
-		hiveclient.ShellQuote("X-Hive-Internal: "+b.token), hiveclient.ShellQuote(hiveclient.APIAddr+"/api/restart/"+hiveclient.EscapePath(agent)))
-	return b.c.Sh(ctx, ns, b.pod, script)
+	// The token reaches curl on stdin (see hiveclient.CurlTokenConfig); the
+	// perms fix before it does not read stdin.
+	script := livenessPermsFix + "\n" + fmt.Sprintf(`curl -sS -X POST --max-time 150 -K - %s 2>&1`,
+		hiveclient.ShellQuote(hiveclient.APIAddr+"/api/restart/"+hiveclient.EscapePath(agent)))
+	return b.c.ShStdin(ctx, ns, b.pod, script, hiveclient.CurlTokenConfig(b.token))
 }
 
 func (b boundAPI) Hygiene(ctx context.Context, ns string) error {
