@@ -6,6 +6,7 @@ import (
 	"flag"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -36,7 +38,7 @@ func main() {
 	var metricsAddr, probeAddr, dashAddr string
 	var spokeInterval, authInterval, ladderInterval, poolInterval, hkInterval time.Duration
 	var leaderElect bool
-	var leaderNS string
+	var leaderNS, watchNS string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Prometheus /metrics address.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe address.")
 	flag.StringVar(&dashAddr, "dashboard-bind-address", ":8082", "Fleet dashboard address. Empty disables it.")
@@ -49,6 +51,11 @@ func main() {
 	// run` fails at startup unless leader election is disabled or given one.
 	flag.BoolVar(&leaderElect, "leader-elect", true, "Enable leader election. Disable for local runs.")
 	flag.StringVar(&leaderNS, "leader-election-namespace", "", "Namespace holding the leader lease. Required when running outside the cluster.")
+	// The cache lists and watches, so it decides how wide the list and watch
+	// permissions must be. With the default, every namespaced kind the operator
+	// reads needs them cluster-wide. Naming the hive namespaces here lets RBAC
+	// bind the namespaced rules in those namespaces only.
+	flag.StringVar(&watchNS, "watch-namespaces", "", "Comma-separated namespaces the cache lists and watches namespaced kinds in. Empty means every namespace.")
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -60,6 +67,7 @@ func main() {
 	cfg := ctrl.GetConfigOrDie()
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                  scheme,
+		Cache:                   cacheOptions(watchNS),
 		Metrics:                 metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress:  probeAddr,
 		LeaderElection:          leaderElect,
@@ -124,6 +132,30 @@ func main() {
 		setupLog.Error(err, "manager exited")
 		os.Exit(1)
 	}
+}
+
+// cacheOptions limits the manager's cache to the namespaces in a
+// comma-separated list. It applies to namespaced kinds only (Pods, ConfigMaps,
+// Deployments, CronJobs): the hive.tunaos.org kinds and Nodes are
+// cluster-scoped and stay cluster-wide. An empty list returns the zero
+// options, which is the cluster-wide cache the operator has always had.
+//
+// A read through the cache of a namespace that is not listed fails with an
+// "unknown namespace for the cache" error. Calls made with the clientset (pod
+// lists, pod exec) do not go through the cache: only RBAC limits those.
+func cacheOptions(namespaces string) cache.Options {
+	var opts cache.Options
+	for _, ns := range strings.Split(namespaces, ",") {
+		ns = strings.TrimSpace(ns)
+		if ns == "" {
+			continue
+		}
+		if opts.DefaultNamespaces == nil {
+			opts.DefaultNamespaces = map[string]cache.Config{}
+		}
+		opts.DefaultNamespaces[ns] = cache.Config{}
+	}
+	return opts
 }
 
 // httpRunnable serves the dashboard as a manager Runnable so it starts only
