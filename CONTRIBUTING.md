@@ -7,7 +7,7 @@ hive-operator is a Go Kubernetes operator. It reconciles Hive custom resources, 
 Install or provide these before running commands:
 
 - Git.
-- Go 1.27.2 or newer. The module declares Go 1.26.0; CI and both container build files use Go 1.27.2/1.27.
+- Go 1.27.2 or newer. The module declares Go 1.26.0; CI pins its exact Go version in `.github/workflows/image.yml` (`go-version`), and both container build files use the `golang:1.27` image.
 - GNU Make for the repository targets in `Makefile`.
 - `kubectl` and a kubeconfig for `make deploy`, `make run`, sample resources, and shadow-diff checks. Unit tests and local builds do not need a cluster.
 - Docker for `make docker-build` and `make docker-build-usage`.
