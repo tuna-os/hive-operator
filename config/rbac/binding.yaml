@@ -14,10 +14,36 @@ metadata:
   name: hive-operator
   namespace: hive-system
 ---
+# The only cluster-wide grant: the kinds that have no namespace. The generated
+# hive-operator ClusterRole (role.yaml) also holds pod exec, Secret reads and
+# CronJob and Deployment writes, so it is bound per hive namespace in
+# config/rbac-fleet, never with a ClusterRoleBinding. A test in cmd keeps this
+# role equal to the cluster-scoped rules of role.yaml.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hive-operator-cluster
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch]
+  - apiGroups: [hive.tunaos.org]
+    resources: [hivehousekeepings, hivereleases, hivespokes, modelladders, sharedauths, usagepools]
+    verbs: [get, list, patch, update, watch]
+  - apiGroups: [hive.tunaos.org]
+    resources:
+      - hivehousekeepings/status
+      - hivereleases/status
+      - hivespokes/status
+      - modelladders/status
+      - sharedauths/status
+      - usagepools/status
+    verbs: [get, patch, update]
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: hive-operator
+  name: hive-operator-cluster
 subjects:
   - kind: ServiceAccount
     name: hive-operator
@@ -25,7 +51,33 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: hive-operator
+  name: hive-operator-cluster
+---
+# An event about a cluster-scoped object is stored in `default`, and
+# HiveRelease is cluster-scoped. Nothing else is granted there.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hive-operator-events
+  namespace: default
+rules:
+  - apiGroups: ["", events.k8s.io]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hive-operator-events
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: hive-operator
+    namespace: hive-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: hive-operator-events
 ---
 # Leader election needs coordination leases in its own namespace.
 apiVersion: rbac.authorization.k8s.io/v1

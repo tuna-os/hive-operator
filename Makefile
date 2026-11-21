@@ -26,9 +26,11 @@ docker-build-usage: ; docker build -f Dockerfile.usage -t $(USAGE_IMG) .
 deploy: manifests
 	kubectl apply -f config/crd
 	kubectl apply -f config/rbac
+	kubectl apply -f config/rbac-fleet
 	kubectl apply -f config/manager
 
 undeploy:
 	-kubectl delete -f config/manager
+	-kubectl delete -f config/rbac-fleet
 	-kubectl delete -f config/rbac
 	-kubectl delete -f config/crd
