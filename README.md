@@ -196,6 +196,7 @@ before applying.
 ```bash
 kubectl apply -f config/crd
 kubectl apply -f config/rbac
+kubectl apply -f config/rbac-fleet                  # needs the hive namespaces to exist; see below
 kubectl apply -f config/manager
 kubectl apply -f config/samples/fleet.yaml          # SharedAuth + HiveSpoke rotation/liveness Enforce; ModelLadder Shadow
 kubectl apply -f config/samples/release.yaml        # HiveRelease, Enforce (docs/release.md)
@@ -203,7 +204,44 @@ kubectl apply -f config/samples/housekeeping.yaml   # HiveHousekeeping, Enforce 
 kubectl apply -f config/usage/usagepools.yaml
 ```
 
-`--watch-namespaces=hive,hive-reef` limits the manager's cache to the listed namespaces. It covers the namespaced kinds only: Pods, ConfigMaps, Deployments and CronJobs. The default is every namespace, and that is why `config/rbac/binding.yaml` still binds the role cluster-wide. The flag is what lets the namespaced rules be bound per namespace instead (#110). A namespace that is listed but has no binding stops the manager soon after it starts, because its cache never syncs.
+### Where the operator has authority
+
+The operator's role allows pod exec, Secret reads, and CronJob and Deployment writes. It is granted in the hive namespaces only, not cluster-wide:
+
+- `config/rbac-fleet/bindings.yaml` binds the generated `hive-operator` ClusterRole with one RoleBinding per namespace: `hive`, `hive-reef`, `hive-hanthor`, `hive-hub` and `hive-contributors`.
+- `config/manager/manager.yaml` passes the same list as `--watch-namespaces`. The flag limits the manager's cache to those namespaces for the namespaced kinds (Pods, ConfigMaps, Deployments, CronJobs).
+- `config/rbac/binding.yaml` binds cluster-wide only what has no namespace: the `hive.tunaos.org` kinds and Nodes. It also lets the operator write events in `default`, where Kubernetes stores events about a cluster-scoped `HiveRelease`.
+
+The two lists must be equal, and `go test ./cmd` fails when they are not. Check them against the cluster before every deploy:
+
+- Every listed namespace must exist. A namespace in the flag that is missing, or has no binding, stops the manager soon after it starts, because its cache never syncs. `config/rbac-fleet` does not create namespaces: they belong to the hive deployment.
+- Every namespace a custom resource names must be listed. A resource that names another one gets `unknown namespace for the cache` or `forbidden` errors. This command prints the namespaces the live resources name; add `hive` and `hive-contributors`, the defaults for empty fields:
+
+```bash
+kubectl get hivespokes,hivereleases,hivehousekeepings,sharedauths,usagepools,modelladders -o json \
+  | jq -r '[.items[].spec | .. | objects | to_entries[] | select(.key | test("namespaces?$"; "i")) | .value] | flatten | map(select(type == "string" and . != "")) | unique | join(",")'
+```
+
+To add a namespace, add its RoleBinding and extend the flag in the same change.
+
+**Switching an install that has the old cluster-wide binding.** `kubectl apply` does not remove a binding that a file stops declaring, so the old grant stays until it is deleted:
+
+```bash
+kubectl apply -f config/rbac
+kubectl apply -f config/rbac-fleet
+kubectl apply -f config/manager
+kubectl delete clusterrolebinding hive-operator   # this removes the cluster-wide grant
+sa=system:serviceaccount:hive-system:hive-operator
+for ns in hive hive-reef hive-hanthor hive-hub hive-contributors; do
+  kubectl auth can-i list deployments -n "$ns" --as="$sa"   # yes, five times
+done
+kubectl auth can-i create pods/exec -n kube-system --as="$sa"   # no
+kubectl -n hive-system rollout restart deployment/hive-operator
+```
+
+The manager's probes do not wait for its cache, so a rollout that reports success proves nothing here. A manager that cannot sync exits after two minutes: look at the pod's restart count after three.
+
+To go back, apply the previous revision of `config/rbac` and `config/manager`.
 
 The usage sidecar (`cmd/hive-usage`, image `ghcr.io/tuna-os/hive-operator/hive-usage`, built from `Dockerfile.usage`) goes into each spoke's hive Deployment via `config/usage/hive-usage-patch.yaml`. To try it on copied logs:
 
