@@ -1,0 +1,1 @@
+Rotation now honors spec.ccleft.account: a UsagePool pinned to one ccleft account no longer takes its rotation reading from a different account of the same provider with more homes; an absent pinned account is unmeasured (-1).
