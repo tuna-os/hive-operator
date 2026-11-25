@@ -35,6 +35,7 @@ Important paths:
 - `internal/rotation/`, `internal/liveness/`, and `internal/usage/` — controller policy and usage logic.
 - `cmd/` — manager, shadow-diff, and usage-sidecar entry points.
 - `config/crd/`, `config/rbac/`, and `config/manager/` — generated and deployment manifests.
+- `config/rbac-fleet/` — the per-namespace bindings of the operator's role.
 - `config/samples/` and `config/usage/` — example resources.
 - `docs/` — promotion and operational runbooks.
 
@@ -64,9 +65,10 @@ The image workflow runs `go build ./...`, `go vet ./...`, and `go test ./... -co
 
 ## Run locally against Kubernetes
 
-`make deploy` generates manifests and applies CRDs, RBAC, and the manager Deployment in `hive-system`:
+`make deploy` generates manifests and applies CRDs, RBAC, and the manager Deployment in `hive-system`. The operator's role is bound in the hive namespaces only (`config/rbac-fleet`), and those namespaces must exist first. On a disposable cluster, create them:
 
 ```sh
+for ns in hive hive-reef hive-hanthor hive-hub hive-contributors; do kubectl create namespace "$ns"; done
 make deploy
 kubectl -n hive-system get deployment hive-operator
 ```

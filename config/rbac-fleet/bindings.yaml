@@ -1,0 +1,83 @@
+# The generated hive-operator ClusterRole, granted in the hive namespaces only.
+# A RoleBinding to a ClusterRole grants its namespaced rules in that one
+# namespace, and none of its cluster-scoped ones.
+#
+# One binding per namespace a custom resource names: the three spokes, the hub
+# (config/samples/release.yaml) and the contributor pool. The same list is the
+# manager's --watch-namespaces (config/manager/manager.yaml); a test in cmd
+# fails when the two differ. To add a namespace, add its binding here and its
+# name to the flag.
+#
+# These are not in config/rbac because the namespaces belong to the hive
+# deployment, not to the operator: this file does not create them, so that
+# `make undeploy` can never delete one, and applying it fails for a namespace
+# that does not exist yet.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hive-operator
+  namespace: hive
+subjects:
+  - kind: ServiceAccount
+    name: hive-operator
+    namespace: hive-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hive-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hive-operator
+  namespace: hive-reef
+subjects:
+  - kind: ServiceAccount
+    name: hive-operator
+    namespace: hive-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hive-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hive-operator
+  namespace: hive-hanthor
+subjects:
+  - kind: ServiceAccount
+    name: hive-operator
+    namespace: hive-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hive-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hive-operator
+  namespace: hive-hub
+subjects:
+  - kind: ServiceAccount
+    name: hive-operator
+    namespace: hive-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hive-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hive-operator
+  namespace: hive-contributors
+subjects:
+  - kind: ServiceAccount
+    name: hive-operator
+    namespace: hive-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hive-operator

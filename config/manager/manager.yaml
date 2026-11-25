@@ -23,8 +23,14 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: manager
-          image: ghcr.io/tuna-os/hive-operator:sha-f946dd2
-          args: ["--metrics-bind-address=:8080", "--dashboard-bind-address=:8082"]
+          image: ghcr.io/tuna-os/hive-operator:sha-9aea0d9
+          # --watch-namespaces must name exactly the namespaces that have a
+          # RoleBinding in config/rbac-fleet. One without a binding stops the
+          # manager, because its cache never syncs.
+          args:
+            - --metrics-bind-address=:8080
+            - --dashboard-bind-address=:8082
+            - --watch-namespaces=hive,hive-reef,hive-hanthor,hive-hub,hive-contributors
           ports:
             - {name: metrics, containerPort: 8080}
             - {name: dashboard, containerPort: 8082}
