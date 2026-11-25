@@ -218,6 +218,15 @@ func rotationReading(pool *hivev1.UsagePool, out *usage.CcleftOutput, cm map[str
 	rr := &hivev1.PoolRotationReading{Percent: -1, Source: "none", ComputedAt: metaTime(now)}
 	var samples []usage.PaceSample
 	if out != nil {
+		// A pinned account is the only account allowed to speak for this
+		// pool; another account on the same provider must not drive rotation.
+		if ref := pool.Spec.Ccleft; ref != nil && ref.Account != "" {
+			prov := ccleft.Provider(ref.Provider)
+			if prov == "" {
+				prov = usage.CcleftProvider(p)
+			}
+			out = usage.ScopeToAccount(out, prov, ref.Account)
+		}
 		l := usage.CcleftProbe(out, p, now, 0, 0)
 		rr.Percent, rr.Note, rr.Source = int32(l.Percent), l.Note, "ccleft"
 		at, ok := usage.MeasuredAt(out, p)

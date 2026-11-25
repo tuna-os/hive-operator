@@ -104,6 +104,25 @@ func SelectCcleftReading(out *CcleftOutput, p ccleft.Provider, account string) (
 	return ccleft.Reading{}, fmt.Errorf("ccleft serves %d %s accounts (%s); pin spec.ccleft.account", len(found), p, strings.Join(ids, ","))
 }
 
+// ScopeToAccount returns out restricted to the pinned account's readings for
+// provider p. Readings of other providers are kept; an empty account returns
+// out unchanged. When the pinned account is absent the result carries no
+// reading for p, so downstream reductions report it unmeasured instead of
+// borrowing another account's quota.
+func ScopeToAccount(out *CcleftOutput, p ccleft.Provider, account string) *CcleftOutput {
+	if out == nil || account == "" {
+		return out
+	}
+	scoped := &CcleftOutput{GeneratedAt: out.GeneratedAt}
+	for _, r := range out.Readings {
+		if r.Provider == p && r.Account != account {
+			continue
+		}
+		scoped.Readings = append(scoped.Readings, r)
+	}
+	return scoped
+}
+
 // CcleftUsable reports whether a reading may feed a pool at now: it must
 // carry a measured verdict (a stale last-good counts — it IS a measurement)
 // no older than maxAge.

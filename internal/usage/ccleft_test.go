@@ -147,3 +147,34 @@ func TestPickCcleftWindowAndReading(t *testing.T) {
 		t.Fatalf("an empty window must stay unknown: %+v", rd)
 	}
 }
+
+func TestScopeToAccount(t *testing.T) {
+	out := liveReadings(t)
+	if got := ScopeToAccount(out, ccleft.Kiro, ""); got != out {
+		t.Fatal("empty account must return the document unchanged")
+	}
+	dup := out.Readings[0]
+	for _, r := range out.Readings {
+		if r.Provider == ccleft.Kiro {
+			dup = r
+		}
+	}
+	dup.Account = "other"
+	out.Readings = append(out.Readings, dup)
+	got := ScopeToAccount(out, ccleft.Kiro, "000000000000a005")
+	n := 0
+	for _, r := range got.Readings {
+		if r.Provider == ccleft.Kiro {
+			n++
+			if r.Account != "000000000000a005" {
+				t.Fatalf("kept %s", r.Account)
+			}
+		}
+	}
+	if n != 1 || len(got.Readings) != len(out.Readings)-1 {
+		t.Fatalf("kiro readings %d, total %d", n, len(got.Readings))
+	}
+	if p := CcleftProbe(ScopeToAccount(out, ccleft.Kiro, "missing"), "kiro", liveNow, 0, 0); p.Percent != -1 {
+		t.Fatalf("absent pinned account must be unmeasured: %+v", p)
+	}
+}
